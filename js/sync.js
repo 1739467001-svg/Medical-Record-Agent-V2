@@ -68,3 +68,26 @@ export async function postConfig(cfg) {
 export async function serverLLMTest() {
   return jfetch('/api/llm/test', { method: 'POST', body: '{}' });
 }
+
+/* 生成智能体的大模型调用（M2.1，经服务端代理 /api/llm/chat；密钥不出服务器）。
+ * 返回 {ok, upstream} 或 {ok:false, error}——绝不抛异常，由调用方回落规则引擎。 */
+export async function serverLLMChat(body) {
+  if (!serverState.online) return { ok: false, error: '服务端离线（本机演示模式）' };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 40000);
+  try {
+    const r = await fetch('/api/llm/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const j = await r.json();
+    if (!r.ok) return { ok: false, error: (j && (j.error || j.msg)) || ('HTTP ' + r.status) };
+    return j;
+  } catch (e) {
+    return { ok: false, error: e.name === 'AbortError' ? '生成超时（40s）' : (e.message || String(e)) };
+  } finally {
+    clearTimeout(timer);
+  }
+}

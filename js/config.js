@@ -15,6 +15,7 @@ export function defaults() {
       aliyun: { appKey: '', apiKey: '' },
     },
     llm: { baseUrl: '', apiKey: '', model: '' },
+    gen: 'auto', // 生成引擎：auto=大模型就绪即启用（失败回落规则）| rules=强制规则演示
     _srv: null, // 服务端状态标记（由 adoptServerStatus 写入）
   };
 }

@@ -6,6 +6,7 @@
  * ============================================================ */
 
 import { AGENTS } from './data.js';
+import { prepareGeneration } from './llm.js';
 
 /* 体检常规（规范所见模板，源自本院入院记录模板语言） */
 const NORM_PHYSICAL = `发育正常，营养良好，表情痛苦，急性面容，强迫体位，查体合作。全身皮肤、黏膜正常，无肝掌、蜘蛛痣。全身浅表淋巴结无肿大。头颅无畸形、压痛、包块、瘢痕。眼睑无水肿，结膜无充血、无苍白，巩膜无黄染，角膜正常，瞳孔等大同圆，对光调节反射正常。颈软，颈动脉搏动正常，颈静脉无怒张，气管居中，甲状腺无肿大。胸廓对称、无畸形，呼吸运动正常，双肺呼吸音清，未闻及干湿性啰音。心前区无隆起，律齐，各瓣膜听诊区未闻及杂音。`;
@@ -383,59 +384,96 @@ function runMapping(fields, patient) {
   };
 }
 
-/* ---------- 编排调度器（Orchestrator） ---------- */
+/* ---------- 编排调度器（Orchestrator） ----------
+ * 生成步为异步：规则底稿先行计算（同步、确定性），LLM 就绪时由 llm.js 增强改写，
+ * 任何失败回落规则底稿——两态产出同构，下游（草稿/质控/映射/评测）无感知。 */
 export function runPipeline(patient, { onStep, onDone }) {
   const steps = AGENTS.map(a => a.id);
-  const ctx = {};
+  const ctx = { genEngine: 'rules' };
   let cancelled = false;
+  let finished = false;
   const startedAt = Date.now();
   const STEP_MS = 1250;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  /* 规则底稿（纯函数、确定性；LLM 增强的底值与失败兜底） */
+  function rulesFabrics() {
+    if (patient.scene === 'opd') return { opd: runGenerateOPD(patient) };
+    const adm = runGenerate(patient);
+    return {
+      adm,
+      fc: runGenerateFC(patient, adm.fields),
+      dc: runGenerateDC(patient, adm.fields),
+    };
+  }
+  const fabrics = rulesFabrics();
+  /* LLM 增强在流水线启动即并行发起（mock 桩毫秒级；真实模型时生成步会等待） */
+  const genPromise = prepareGeneration(patient, fabrics);
+
+  function applyRulesGeneration() {
+    if (patient.scene === 'opd') {
+      ctx.generate = fabrics.opd;
+    } else {
+      ctx.generate = fabrics.adm;
+      ctx.generateFC = fabrics.fc;
+      ctx.generateDC = fabrics.dc;
+    }
+    ctx.genEngine = 'rules';
+  }
+
+  async function applyGeneration() {
+    const bundle = await genPromise;
+    if (bundle.engine === 'llm') {
+      if (patient.scene === 'opd') {
+        ctx.generate = bundle.opd || fabrics.opd;
+      } else {
+        ctx.generate = bundle.adm || fabrics.adm;
+        ctx.generateFC = bundle.fc || fabrics.fc;
+        ctx.generateDC = bundle.dc || fabrics.dc;
+      }
+      ctx.genEngine = 'llm';
+    } else {
+      applyRulesGeneration();
+    }
+  }
 
   function computeStep(id) {
     if (id === 'extract') ctx.extract = runExtract(patient);
     if (id === 'aggregate') ctx.aggregate = runAggregate(patient);
     if (id === 'retrieve') ctx.retrieve = runRetrieve(patient);
-    if (id === 'generate') {
-      if (patient.scene === 'opd') {
-        ctx.generate = runGenerateOPD(patient);
-      } else {
-        ctx.generate = runGenerate(patient);
-        // T10/T11：同轮产出首次病程与出院记录字段组（由入院记录草稿多源汇聚）
-        ctx.generateFC = runGenerateFC(patient, ctx.generate.fields);
-        ctx.generateDC = runGenerateDC(patient, ctx.generate.fields);
-      }
-    }
+    if (id === 'generate') { /* 异步步：pump 中先 await applyGeneration() */ }
     if (id === 'qc') ctx.qc = runQC(ctx.generate, ctx.aggregate, ctx.retrieve);
     if (id === 'mapping') ctx.mapping = runMapping(ctx.generate.fields, patient);
   }
-  function computeAll() {
-    steps.forEach(computeStep);
-    return ctx;
-  }
 
-  let next = 0;
-  const timer = setInterval(() => {
-    if (cancelled) { clearInterval(timer); return; }
-    const elapsed = Date.now() - startedAt;
-    // 追帧：后台节流时按真实耗时补跑未完成的步骤
-    while (next < steps.length && (elapsed >= 300 + next * STEP_MS || elapsed > 300 + (steps.length - 1) * STEP_MS + 600)) {
-      computeStep(steps[next]);
-      onStep && onStep(AGENTS[next], ctx[steps[next]], next, steps.length);
-      next += 1;
-      if (next === steps.length) {
-        clearInterval(timer);
-        onDone && onDone(ctx);
-        return;
-      }
+  /* 顺序泵：保留原分步动画节奏（300ms 起步、每步 1250ms），落后时自动追帧 */
+  (async () => {
+    for (let i = 0; i < steps.length; i++) {
+      if (cancelled || finished) return;
+      const wait = 300 + i * STEP_MS - (Date.now() - startedAt);
+      if (wait > 0) await sleep(wait);
+      if (cancelled || finished) return;
+      if (steps[i] === 'generate') await applyGeneration();
+      else computeStep(steps[i]);
+      if (cancelled || finished) return;
+      onStep && onStep(AGENTS[i], ctx[steps[i]], i, steps.length);
     }
-  }, 150);
+    finished = true;
+    onDone && onDone(ctx);
+  })();
 
   return {
     skipAll() {
+      if (finished) return;
       cancelled = true;
-      clearInterval(timer);
-      computeAll();
-      onDone && onDone(ctx);
+      (async () => {
+        for (let i = 0; i < steps.length; i++) {
+          if (steps[i] === 'generate') await applyGeneration();
+          else computeStep(steps[i]);
+        }
+        finished = true;
+        onDone && onDone(ctx);
+      })();
     },
   };
 }

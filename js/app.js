@@ -5,8 +5,9 @@
 
 import { HOSPITAL, SYSTEM_NAME, DOCTORS, PATIENTS, OPD_PATIENTS, AGENTS, SOURCE_META, OPD_NOTE, DEMO_BANNER, GOLD_CASE, ASR_TESTSET } from './data.js';
 import { ASR_ENGINES, engineReady, startWebSpeechASR } from './asr.js';
-import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus } from './config.js';
+import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus, llmServerReady } from './config.js';
 import { serverState, bootSync, postAudit, postArchive, postConfig, serverLLMTest } from './sync.js';
+import { llmGenActive, llmGenMode } from './llm.js';
 import { runPipeline } from './agents.js';
 import { evaluateAgainstGold } from './eval.js';
 import { buildAdmissionMD, buildFCMD, buildDCMD, buildOPMD, buildProfileMD, buildEvalMD, downloadMD } from './md.js';
@@ -745,7 +746,7 @@ function startPipeline() {
   const c = state.consult;
   if (c.pipeHandle) return;
   const p = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
-  audit('启动多智能体', `${p.name} · ${c.scene === 'opd' ? '门诊病历' : '入院记录'} · 编排 6 智能体`);
+  audit('启动多智能体', `${p.name} · ${c.scene === 'opd' ? '门诊病历' : '入院记录'} · 编排 6 智能体 · 生成引擎：${llmGenActive() ? '大模型' : '规则演示'}`);
   c.pipeHandle = runPipeline(p, {
     onStep(agent, output, i, total) {
       c.pipeSteps[i] = output;
@@ -1271,7 +1272,7 @@ function bindGoldEval(view) {
   const runBtn = view.querySelector('#btn-gold-run');
   if (runBtn) runBtn.onclick = () => {
     state.goldEval = { running: true, steps: [], done: false, results: null, docType: 'adm', handle: null };
-    audit('金标准评测', `启动规则重组引擎评测：${N(GOLD_CASE)} ${GOLD_CASE.admittedAt.slice(0, 10)} 三类文书`);
+    audit('金标准评测', `启动${llmGenActive() ? '大模型' : '规则重组引擎'}评测：${N(GOLD_CASE)} ${GOLD_CASE.admittedAt.slice(0, 10)} 三类文书`);
     renderGoldEval();
     const p = GOLD_CASE;
     state.goldEval.handle = runPipeline(p, {
@@ -1287,7 +1288,7 @@ function bindGoldEval(view) {
         };
         state.goldEval = { running: false, steps: state.goldEval.steps, done: true, results, docType: 'adm', handle: null };
         const rate = k => (results[k].metrics.usableRate * 100).toFixed(0);
-        audit('评测完成', `规则引擎基线：入院 ${rate('adm')}% · 首次病程 ${rate('fc')}% · 出院 ${rate('dc')}% 可用率`);
+        audit('评测完成', `${ctx.genEngine === 'llm' ? '大模型' : '规则引擎'}口径：入院 ${rate('adm')}% · 首次病程 ${rate('fc')}% · 出院 ${rate('dc')}% 可用率`);
         renderGoldEval();
         toast('三类文书评测完成');
       },
@@ -1319,7 +1320,7 @@ function renderSettings() {
   const cfg = getConfig();
   const srv = cfg._srv || {};
   const srvChip = serverState.online
-    ? '<span class="pill dlg"><span class="dot"></span>服务端在线 · 留痕/归档入库 SQLite · 密钥仅存服务器</span>'
+    ? `<span class="pill dlg"><span class="dot"></span>服务端在线 · 留痕/归档入库 ${serverState.info && serverState.info.db && serverState.info.db.backend === 'mysql' ? 'MySQL' : 'SQLite'} · 密钥仅存服务器</span>`
     : '<span class="pill miss"><span class="dot"></span>服务端离线 · 本机演示模式（密钥暂存本机浏览器）</span>';
   view.innerHTML = `
     <h1 class="page-title">系统设置</h1>
@@ -1366,7 +1367,12 @@ function renderSettings() {
               <button class="btn" id="btn-test-llm">测试连接${serverState.online ? '（服务端代理）' : '（本机直连）'}</button>
               <span id="llm-test-result" style="font-size:12.5px"></span>
             </div>
-            <div class="muted mt-10" style="font-size:12px;line-height:1.8">测试经 ${serverState.online ? '服务端 /api/llm/test 代理（无 CORS 限制）' : '浏览器直连 /models'}。当前生成链路仍为规则引擎演示；配置就绪后 M2.1 按同接口替换生成智能体，金标准评测同口径复测。</div>
+            <div class="engine-row mt-10">
+              <span class="engine-chip ${llmGenMode() === 'auto' ? 'sel' : ''}" data-gen="auto">生成引擎：自动（大模型就绪即启用）</span>
+              <span class="engine-chip ${llmGenMode() === 'rules' ? 'sel' : ''}" data-gen="rules">生成引擎：规则演示（强制）</span>
+              <span id="gen-status" class="muted" style="font-size:12px"></span>
+            </div>
+            <div class="muted mt-10" style="font-size:12px;line-height:1.8">测试经 ${serverState.online ? '服务端 /api/llm/test 代理（无 CORS 限制）' : '浏览器直连 /models'}。"自动"模式下，服务端大模型配置就绪后生成智能体即刻切换为大模型草稿（按字段书写要求 + JSON 结构化输出），任何失败自动回落规则引擎，不阻断接诊；金标准评测同口径复测。</div>
           </div>
         </div>
         <div class="card">
@@ -1385,6 +1391,23 @@ function renderSettings() {
 }
 
 function bindSettings(view, cfg) {
+  /* 生成引擎偏好（本机偏好项，非密钥）：auto=大模型就绪即启用 / rules=强制规则演示 */
+  const genStatus = () => {
+    const el = view.querySelector('#gen-status');
+    if (!el) return;
+    el.textContent = llmGenMode() === 'rules'
+      ? '当前生效：规则引擎（演示）'
+      : (llmServerReady() ? '当前生效：大模型草稿（服务端已配置，失败自动回落规则）' : '当前生效：规则引擎（服务端大模型未配置，登记后自动启用）');
+  };
+  view.querySelectorAll('[data-gen]').forEach(ch => ch.onclick = () => {
+    cfg.gen = ch.dataset.gen;
+    saveConfig(cfg);
+    view.querySelectorAll('[data-gen]').forEach(x => x.classList.toggle('sel', x.dataset.gen === cfg.gen));
+    genStatus();
+    audit('系统设置', '生成引擎切换为' + (cfg.gen === 'rules' ? '规则演示（强制）' : '自动（大模型就绪即启用）'));
+  });
+  genStatus();
+
   view.querySelectorAll('[data-cfg-eng]').forEach(ch => ch.onclick = () => {
     cfg.asr.engine = ch.dataset.cfgEng;
     view.querySelectorAll('[data-form]').forEach(f => { f.style.display = f.dataset.form === cfg.asr.engine ? '' : 'none'; });
