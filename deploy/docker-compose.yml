@@ -1,0 +1,46 @@
+# AI 病历智能体 · 容器编排（云服务器部署推荐形态）
+# 用法：cd medagent/deploy && docker compose up -d
+# 数据：medagent-data 卷持久化留痕/归档库与密钥；迁移/备份见运维手册第八章
+services:
+  medagent:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: medagent
+    ports:
+      - "127.0.0.1:8801:8801"   # 仅本机回环暴露，公网经 nginx 反代（见 nginx.conf.example）
+    volumes:
+      - medagent-data:/app/data_server
+    environment:
+      - MEDAGENT_DB_BACKEND=sqlite
+      # - MEDAGENT_DB_BACKEND=mysql   # 切换 MySQL 时启用，并在 data_server/config.json 配 db 节
+    restart: unless-stopped
+
+  # 可选：MySQL 8 自建（院方无现成实例时启用；有实例则注释本节改用外部库）
+  # mysql:
+  #   image: mysql:8.0
+  #   container_name: medagent-mysql
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: 请更换强密码
+  #     MYSQL_DATABASE: medagent
+  #     MYSQL_USER: medagent
+  #     MYSQL_PASSWORD: 请更换强密码
+  #   command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+  #   volumes:
+  #     - mysql-data:/var/lib/mysql
+  #   restart: unless-stopped
+
+  # 可选：nginx 反代 + HTTPS（证书放置 ./certs/；或用宿主机 nginx，见 nginx.conf.example）
+  # nginx:
+  #   image: nginx:alpine
+  #   ports: ["80:80", "443:443"]
+  #   volumes:
+  #     - ./nginx.conf.example:/etc/nginx/conf.d/default.conf:ro
+  #     - ./certs:/etc/nginx/certs:ro
+  #   depends_on:
+  #     - medagent
+  #   restart: unless-stopped
+
+volumes:
+  medagent-data:
+  # mysql-data:

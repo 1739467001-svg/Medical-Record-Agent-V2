@@ -1,0 +1,21 @@
+[Unit]
+Description=AI MedAgent BFF Server (AI 病历智能体)
+After=network.target mysql.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/medagent
+ExecStart=/usr/bin/python3 server.py 8801
+Restart=on-failure
+RestartSec=3
+User=medagent
+Group=medagent
+
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/medagent/data_server
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1400,7 +1400,17 @@ function renderSettings() {
               <button class="btn ${state.mask ? 'primary' : ''}" id="btn-mask2">${state.mask ? '脱敏：开（点击关闭）' : '脱敏：关（点击开启）'}</button>
               <button class="btn danger-outline" id="btn-clear-demo">清空演示归档与留痕</button>
             </div>
-            <div class="muted mt-10" style="font-size:12px;line-height:1.8">脱敏开启后所有界面与 MD 导出的患者姓名显示为化名。${serverState.online ? '清空将同时清除服务端 SQLite 中的演示数据。' : ''}</div>
+            <div class="muted mt-10" style="font-size:12px;line-height:1.8">脱敏开启后所有界面与 MD 导出的患者姓名显示为化名。${serverState.online ? `清空将同时清除服务端 ${serverState.info && serverState.info.db && serverState.info.db.backend === 'mysql' ? 'MySQL' : 'SQLite'} 中的演示数据。` : ''}</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>④ 接入自检</h3><span class="hint">外部资源登记后一键体检（对应 docs/接入准备清单.md）</span></div>
+          <div class="card-body">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <button class="btn primary" id="btn-preflight">运行自检</button>
+              <span class="muted" style="font-size:12px">检查 BFF / 数据库 / ASR 密钥（真实签名请求）/ 大模型（真实连通测试）/ 数据层完整性</span>
+            </div>
+            <div id="preflight-out" class="mt-10" style="font-size:13px;line-height:2.1"></div>
           </div>
         </div>
       </div>
@@ -1425,6 +1435,53 @@ function bindSettings(view, cfg) {
     audit('系统设置', '生成引擎切换为' + (cfg.gen === 'rules' ? '规则演示（强制）' : '自动（大模型就绪即启用）'));
   });
   genStatus();
+
+  /* 接入自检（docs/接入准备清单.md 的机检面）：每项真实探测，未登记项显示"待交付"而非失败 */
+  const pfBtn = view.querySelector('#btn-preflight');
+  if (pfBtn) pfBtn.onclick = async () => {
+    const out = view.querySelector('#preflight-out');
+    pfBtn.disabled = true;
+    out.innerHTML = '<span class="muted">自检中…</span>';
+    const row = (ok, label, note) => `<div><span class="pill ${ok === true ? 'dlg' : ok === false ? 'miss' : 'norm'}"><span class="dot"></span>${ok === true ? '通过' : ok === false ? '异常' : '待交付'}</span> <b>${label}</b> <span class="muted" style="font-size:12px">${note}</span></div>`;
+    const lines = [];
+    // 1) BFF + 数据库
+    try {
+      const h = await fetch('/api/health').then(r => r.json());
+      const db = h.db || {};
+      lines.push(row(true, 'BFF 服务端', `在线 · ${h.server || ''}`));
+      lines.push(row(!!db, '数据库后端', db.backend === 'mysql' ? `MySQL → ${db.host}/${db.database}` : `SQLite → data_server/${db.file || 'medagent.db'}（单文件可迁移）`));
+      // 2) ASR 讯飞（已登记才做真实签名请求）
+      if (h.iflytek && h.iflytek.hasKey && h.iflytek.hasSecret) {
+        try {
+          const s = await fetch('/api/asr/sign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'iflytek' }) }).then(r => r.json());
+          lines.push(row(!!s.signature, 'ASR · 科大讯飞（rtasr）', s.signature ? '签名服务端计算成功，通道就绪（录音页真实 WS 转写）' : '签名失败：' + (s.error || '未知')));
+        } catch (e) { lines.push(row(false, 'ASR · 科大讯飞（rtasr）', '签名请求异常：' + e.message)); }
+      } else {
+        lines.push(row(null, 'ASR · 科大讯飞（rtasr）', '密钥未登记（docs/接入准备清单.md 第一节）'));
+      }
+      lines.push(row(null, 'ASR · 阿里云（备选比对）', h.aliyun && h.aliyun.hasKey ? '密钥已登记，Token 流程 M2.1 挂接' : '密钥未登记'));
+      // 3) 大模型（已登记才做真实连通测试）
+      if (h.llm && h.llm.hasKey) {
+        const t = await serverLLMTest();
+        lines.push(row(!!t.ok, '大模型（OpenAI 兼容）', t.ok ? '服务端代理连通成功，生成引擎自动生效' : (t.msg || t.error || '连通失败')));
+      } else {
+        lines.push(row(null, '大模型（OpenAI 兼容）', '密钥未登记（docs/接入准备清单.md 第二节）'));
+      }
+    } catch (e) {
+      lines.push(row(false, 'BFF 服务端', '离线：' + e.message + '（bash start.sh 启动）'));
+    }
+    // 4) 数据层完整性（真实取数）
+    try {
+      const n = PATIENTS.length, m = OPD_PATIENTS.length;
+      const rec = await fetch('/data_records/' + encodeURIComponent(PATIENTS[0].name) + '.json').then(r => r.json());
+      lines.push(row(Array.isArray(rec) && rec.length > 0, '数据层', `住院患者 ${n} 位 · 门诊 ${m} 例 · ${PATIENTS[0].name} 病案文书 ${Array.isArray(rec) ? rec.length : 0} 份（data_records 真实原文）`));
+    } catch (e) {
+      lines.push(row(false, '数据层', 'data_records 读取失败：' + e.message));
+    }
+    out.innerHTML = lines.join('');
+    pfBtn.disabled = false;
+    audit('接入自检', '运行接入自检（' + lines.length + ' 项）');
+  };
 
   view.querySelectorAll('[data-cfg-eng]').forEach(ch => ch.onclick = () => {
     cfg.asr.engine = ch.dataset.cfgEng;
