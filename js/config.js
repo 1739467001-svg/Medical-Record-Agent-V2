@@ -60,7 +60,9 @@ export function adoptServerStatus(st) {
 export function asrConfigured(id) {
   const c = getConfig();
   if (id === 'iflytek') {
-    return !!(c.asr.iflytek.appId && c.asr.iflytek.apiKey) || !!c._srv?.iflytek?.hasKey;
+    // rtasr 签名需要 appId+apiKey+apiSecret 三项齐备
+    return !!(c.asr.iflytek.appId && c.asr.iflytek.apiKey && c.asr.iflytek.apiSecret) ||
+           !!(c._srv?.iflytek?.hasKey && c._srv?.iflytek?.hasSecret);
   }
   if (id === 'aliyun') {
     return !!(c.asr.aliyun.appKey && c.asr.aliyun.apiKey) || !!c._srv?.aliyun?.hasKey;

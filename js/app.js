@@ -5,6 +5,7 @@
 
 import { HOSPITAL, SYSTEM_NAME, DOCTORS, PATIENTS, OPD_PATIENTS, AGENTS, SOURCE_META, OPD_NOTE, DEMO_BANNER, GOLD_CASE, ASR_TESTSET } from './data.js';
 import { ASR_ENGINES, engineReady, startWebSpeechASR } from './asr.js';
+import { startRtasrASR } from './rtasr.js';
 import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus, llmServerReady } from './config.js';
 import { serverState, bootSync, postAudit, postArchive, postConfig, serverLLMTest } from './sync.js';
 import { llmGenActive, llmGenMode } from './llm.js';
@@ -573,7 +574,7 @@ function renderStep2(el, c, p) {
                  本系统为<b>真实数据环境</b>：不预置任何演示转写文本。<br>
                  语音转写将在以下任一条件就绪后可用：<br>
                  ① 选择"浏览器语音引擎"并授权麦克风（普通话）；<br>
-                 ② 在"系统设置"登记讯飞/阿里密钥（方言，通道 M2.1 挂接）。<br>
+                 ② 在"系统设置"登记讯飞密钥（实时转写通道已接通：医疗领域优化 + 近场模式，签名由服务端计算）。<br>
                  <span class="muted">当前生成素材源：真实病案文书与 HIS 数据（下一步自动汇聚）。</span>
                </div>`}
         </div>
@@ -622,8 +623,12 @@ function bindStep2(el, c, p) {
 
   const btnStop = el.querySelector('#btn-stop');
   if (btnStop) btnStop.onclick = () => {
-    if (c.asrHandle) c.asrHandle.stop();
-    finishRecording();
+    if (c.asrHandle && c.asrHandle.stop) {
+      // 引擎自主收尾：rtasr 发结束帧等服务端回终稿，webspeech 停识别器，二者经 onDone/onError 回到 finishRecording
+      c.asrHandle.stop();
+    } else {
+      finishRecording();
+    }
   };
 
   function startASR() {
@@ -659,8 +664,21 @@ function bindStep2(el, c, p) {
     if (c.engine === 'webspeech') {
       c.asrHandle = startWebSpeechASR(handlers);
       if (!c.asrHandle) { finishRecording(); return; }
+    } else if (c.engine === 'iflytek') {
+      /* 讯飞实时语音转写（真实 WS 通道，M2.1 S6）：签名服务端计算，麦克风 16k PCM 分帧上行 */
+      startRtasrASR({
+        onProgress(text) { c.transcriptText = text; updateTranscript(); },
+        onStatus(msg) { const h = document.getElementById('rec-hint'); if (h) h.textContent = msg; },
+        onError(msg) { toast(msg, 'err'); finishRecording(); },
+        onDone() { finishRecording(); },
+      }).then(handle => {
+        // 启动是异步的：用户若已结束/出错收尾，则立即停掉刚起的会话，避免悬挂
+        if (c.recording && !c.asrHandle) c.asrHandle = handle;
+        else if (handle && handle.stop) handle.stop();
+        if (!handle) finishRecording();
+      });
     } else {
-      // 云端引擎：密钥就绪但 WS 通道 M2.1 挂接——仅录音，不虚构转写
+      // 阿里云：Token 流程待挂接——仅真实录音留存，不虚构转写
       c.asrHandle = null;
     }
   }

@@ -447,13 +447,14 @@ class Handler(BaseHTTPRequestHandler):
                 engine = data.get('engine')
                 it = load_cfg().get('asr', {}).get('iflytek', {})
                 if engine == 'iflytek':
-                    if not (it.get('apiKey') and it.get('apiSecret')):
-                        self._json(400, {'error': '讯飞密钥未配置'})
+                    if not (it.get('appId') and it.get('apiKey') and it.get('apiSecret')):
+                        self._json(400, {'error': '讯飞密钥未配置（需 appId/apiKey/apiSecret 三项）'})
                         return
+                    # 官方算法（rtasr API 文档）：signa = base64(HmacSHA1(key=apiKey, msg=MD5hex(appid+ts)))
                     ts = str(int(time.time()))
+                    base = hashlib.md5((it['appId'] + ts).encode()).hexdigest()
                     sig = base64.b64encode(hmac.new(
-                        it['apiSecret'].encode(), (it['apiKey'] + ts).encode(),
-                        hashlib.sha1).digest()).decode()
+                        it['apiKey'].encode(), base.encode(), hashlib.sha1).digest()).decode()
                     self._json(200, {'engine': 'iflytek', 'appId': it.get('appId', ''),
                                      'ts': ts, 'signature': sig})
                     return
