@@ -7,6 +7,7 @@
 
 import { AGENTS } from './data.js';
 import { prepareGeneration } from './llm.js';
+import { extractVitals } from './eval.js';
 
 /* 体检常规（规范所见模板，源自本院入院记录模板语言） */
 const NORM_PHYSICAL = `发育正常，营养良好，表情痛苦，急性面容，强迫体位，查体合作。全身皮肤、黏膜正常，无肝掌、蜘蛛痣。全身浅表淋巴结无肿大。头颅无畸形、压痛、包块、瘢痕。眼睑无水肿，结膜无充血、无苍白，巩膜无黄染，角膜正常，瞳孔等大同圆，对光调节反射正常。颈软，颈动脉搏动正常，颈静脉无怒张，气管居中，甲状腺无肿大。胸廓对称、无畸形，呼吸运动正常，双肺呼吸音清，未闻及干湿性啰音。心前区无隆起，律齐，各瓣膜听诊区未闻及杂音。`;
@@ -167,7 +168,8 @@ export function recombineGoldDraft(patient) {
     personal: `生于原籍、久居本地；否认疫区疫水接触史，无烟酒嗜好，无冶游史。`,
     marriage: g.marriage || '',
     family: `父母均已故（原因不详），否认家族遗传性、传染性疾病史。`,
-    vitals: g.vitals,
+    /* gold.vitals 在评测场景为字符串（"T 36.5℃　P 78次/分…"），解析回对象供字段模板拼接 */
+    vitals: typeof g.vitals === 'string' ? extractVitals(g.vitals) : g.vitals,
     specialty: g.specialty,
     auxiliary: g.auxiliary,
     diagnosis: g.diagnosis,

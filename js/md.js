@@ -235,7 +235,7 @@ export function buildEvalMD({ patient, result, doctor, asrName, docLabel }) {
   lines.push('');
   lines.push(`> 依据《AI 病历智能体系统建设实施规划方案 1.0》2.3 评测方法：以医生真实书写版本为金标准，`);
   lines.push(`> 将原始素材输入系统生成草稿，逐字段比对。评测时间：${ts}　执行医师：${doctor.name}`);
-  lines.push(`> 转写引擎：${asrName || '演示转写引擎'}　相似度算法：字符级 bigram F1（正式版换用医学实体级比对）`);
+  lines.push(`> 转写引擎：${asrName || '演示转写引擎'}　相似度算法：字符级 bigram F1 + 实体级比对（M2.2 标尺）`);
   lines.push('');
   lines.push('## 一、总体指标');
   lines.push('');
@@ -244,6 +244,10 @@ export function buildEvalMD({ patient, result, doctor, asrName, docLabel }) {
   lines.push(`| 字段覆盖率 | ${(metrics.coverage * 100).toFixed(1)}%（${metrics.covered}/${metrics.total}） | AI 有内容且金标准有内容 |`);
   lines.push(`| 平均相似度 | ${(metrics.avgSim * 100).toFixed(1)}% | 已覆盖字段 bigram F1 均值 |`);
   lines.push(`| 可用率 | ${(metrics.usableRate * 100).toFixed(1)}%（${metrics.usable}/${metrics.total}） | 一致 + 基本一致（确认修改为主） |`);
+  if (metrics.entGold) {
+    lines.push(`| 实体召回率 | ${((metrics.entRecall || 0) * 100).toFixed(1)}%（${metrics.entHit}/${metrics.entGold}） | 金标准医学实体（诊断/药品/体征/数值）被草稿覆盖 |`);
+    lines.push(`| 实体精确率 | ${((metrics.entPrecision || 0) * 100).toFixed(1)}% | 草稿实体可被金标准证实（越低说明越多无据内容） |`);
+  }
   lines.push('');
   lines.push(`## 二、${docLabel || '入院记录'}逐字段比对`);
   lines.push('');
@@ -262,6 +266,13 @@ export function buildEvalMD({ patient, result, doctor, asrName, docLabel }) {
     weak.forEach(w => lines.push(`- **${w.label}**（${(w.sim * 100).toFixed(0)}%）：表述与金标准存在偏差，提示词/模板需向本院书写风格对齐。`));
   } else {
     lines.push('- 全部字段达到"基本一致"以上，草稿可用。');
+  }
+  const missedAll = rows.filter(r => r.ai && r.gold && r.ent && r.ent.missedEntities && r.ent.missedEntities.length);
+  if (missedAll.length) {
+    lines.push('');
+    lines.push('### 实体漏报明细（草稿未写到的事实，M2.2 重点核对项）');
+    lines.push('');
+    missedAll.forEach(m => lines.push(`- **${m.label}**：${m.ent.missedEntities.join('、')}`));
   }
   lines.push('- 本报告为演示引擎（规则+模板）产出；接入真实大模型后（M2）以同口径复测并追踪指标变化。');
   lines.push('');

@@ -484,6 +484,12 @@ p.page-desc { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 22px; }
 .g-cols { display: grid; grid-template-columns: 1fr 1fr; }
 .g-ai, .g-gold { padding: 11px 14px; font-size: 13.2px; line-height: 1.8; }
 .g-ai { border-right: 1px dashed var(--line); }
+.g-ent-miss {
+  margin: 0 14px 10px; font-size: 12px; line-height: 1.7;
+  color: #7c5410; background: var(--c-miss-bg); border: 1px dashed #e2c28a;
+  border-radius: 0 7px 7px 0; padding: 6px 11px;
+}
+.g-ent-miss::before { content: '⚠ '; font-weight: 700; }
 .g-tag { display: block; font-size: 10.5px; letter-spacing: .14em; color: var(--teal); margin-bottom: 4px; }
 .g-tag.gold { color: #a5832e; }
 .g-gold { background: #fdfbf3; }

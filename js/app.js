@@ -9,6 +9,7 @@ import { startRtasrASR } from './rtasr.js';
 import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus, llmServerReady } from './config.js';
 import { serverState, bootSync, postAudit, postArchive, postConfig, serverLLMTest } from './sync.js';
 import { llmGenActive, llmGenMode } from './llm.js';
+import { hisStatus, hisSourceLabel, enrichPatient } from './his.js';
 import { runPipeline } from './agents.js';
 import { evaluateAgainstGold } from './eval.js';
 import { buildAdmissionMD, buildFCMD, buildDCMD, buildOPMD, buildProfileMD, buildEvalMD, downloadMD } from './md.js';
@@ -57,6 +58,7 @@ function persistConsult() {
       scene: c.scene || 'ipd', patientId: c.patientId, step: c.step, engine: c.engine, asrName: c.asrName,
       turns: c.turns, pipeSteps: c.pipeSteps, pipelineDone: c.pipelineDone,
       drafts: c.drafts, docType: c.docType, archivedDocs: c.archivedDocs, visitedDocs: c.visitedDocs, qc: c.qc, mapping: c.mapping,
+      ...(c.patientSnapshot && c.patientSnapshot.hisSource === 'api' ? { patientSnapshot: c.patientSnapshot } : {}), // api 模式实时数据随会话恢复
     };
     if (c.step === 3 && !c.pipelineDone) snap.step = 2; // 编排中断则退回转写完成态，可一键重启
     sessionStorage.setItem('medagent_consult', JSON.stringify(snap));
@@ -454,6 +456,7 @@ function renderStep1(el, c) {
         <div class="engine-row gap-b">
           <span class="engine-chip ${!isOPD ? 'sel' : ''}" data-scene="ipd">住院场景 · 入院记录</span>
           <span class="engine-chip ${isOPD ? 'sel' : ''}" data-scene="opd">门诊场景 · 门诊病历</span>
+          <span class="engine-chip" id="his-src-chip">数据源：检测中…</span>
         </div>
         <div class="pick-list">
           ${LIST.map(p => `
@@ -483,12 +486,24 @@ function renderStep1(el, c) {
     renderConsult();
   });
   const b = el.querySelector('#btn-to2');
-  if (b) b.onclick = () => {
+  if (b) b.onclick = async () => {
+    /* HIS 数据源增强：export 模式原样；api 模式实时拉取并权威覆盖（失败如实提示回落导出数据） */
+    const enr = await enrichPatient(sel);
+    if (enr.error) {
+      toast('HIS 实时拉取失败，已回落导出数据：' + enr.error, 'err');
+    }
+    const src = enr.source === 'api' ? 'HIS 实时接口' : '导出数据（真实病案/HIS 导出）';
     audit('患者核对', isOPD
-      ? `确认门诊患者 ${sel.name}（门诊号 ${sel.id}），门诊档案与慢病备案拉取完成`
-      : `确认患者 ${sel.name}（病案号 ${sel.id.replace('P', '')}），HIS 主索引与检验检查医嘱拉取完成`);
+      ? `确认门诊患者 ${sel.name}（门诊号 ${sel.id}），数据源：${src}${enr.error ? '（拉取失败回落）' : ''}`
+      : `确认患者 ${sel.name}（病案号 ${sel.id.replace('P', '')}），数据源：${src} · 检验 ${enr.patient.his && enr.patient.his.labs ? enr.patient.his.labs.length : 0} 项 · 医嘱 ${enr.patient.his && enr.patient.his.orders ? enr.patient.his.orders.length : 0} 条`);
+    c.patientSnapshot = enr.patient; // 接诊链路使用增强后的患者数据（api 模式含实时 HIS 覆盖）
     c.step = 2; renderConsult();
   };
+  /* 数据源芯片异步填充（不阻塞渲染） */
+  hisStatus().then(st => {
+    const chip = el.querySelector('#his-src-chip');
+    if (chip) chip.textContent = '数据源：' + hisSourceLabel(st);
+  });
 }
 
 /* 门诊档案预览（蓝 · HIS 带入） */
@@ -763,7 +778,7 @@ function renderStep3(el, c, p) {
 function startPipeline() {
   const c = state.consult;
   if (c.pipeHandle) return;
-  const p = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
+  const p = c.patientSnapshot || (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
   audit('启动多智能体', `${p.name} · ${c.scene === 'opd' ? '门诊病历' : '入院记录'} · 编排 6 智能体 · 生成引擎：${llmGenActive() ? '大模型' : '规则演示'}`);
   c.pipeHandle = runPipeline(p, {
     onStep(agent, output, i, total) {
@@ -1261,7 +1276,7 @@ function goldResultHTML(ev) {
       <div class="stat"><div class="num">${(metrics.coverage * 100).toFixed(0)}%</div><div class="lbl">字段覆盖率（${metrics.covered}/${metrics.total}）</div><div class="trend">AI有内容∩金标准有内容</div></div>
       <div class="stat"><div class="num">${(metrics.avgSim * 100).toFixed(0)}%</div><div class="lbl">平均相似度（bigram F1）</div><div class="trend">已覆盖字段</div></div>
       <div class="stat"><div class="num">${(metrics.usableRate * 100).toFixed(0)}%</div><div class="lbl">可用率（一致+基本一致）</div><div class="trend">对应"确认修改为主"</div></div>
-      <div class="stat"><div class="num">${rows.length}</div><div class="lbl">比对字段数（${docMeta.label}）</div><div class="trend">${docMeta.metric}</div></div>
+      <div class="stat"><div class="num">${metrics.entRecall == null ? '—' : (metrics.entRecall * 100).toFixed(0) + '%'}</div><div class="lbl">实体召回率（M2.2 标尺）</div><div class="trend">金标准事实 ${metrics.entGold || 0} 项 · 草稿命中 ${metrics.entHit || 0} 项（精确率 ${metrics.entPrecision == null ? '—' : (metrics.entPrecision * 100).toFixed(0) + '%'}）</div></div>
     </div>
     <div class="card">
       <div class="card-head"><h3>${docMeta.label} · 逐字段比对</h3><span class="hint">AI 草稿 vs 医生金标准</span>
@@ -1280,6 +1295,7 @@ function goldResultHTML(ev) {
               <div class="g-ai"><span class="g-tag">AI 草稿</span>${r.ai ? esc(r.ai) : '<i class="muted">（空）</i>'}</div>
               <div class="g-gold"><span class="g-tag gold">金标准</span>${r.gold ? esc(r.gold) : '<i class="muted">（金标准缺项）</i>'}</div>
             </div>
+            ${(r.ai && r.gold && (r.ent.missedEntities || []).length) ? `<div class="g-ent-miss">实体漏报：${esc(r.ent.missedEntities.join('、'))}</div>` : ''}
           </div>`;
         }).join('')}
       </div>
@@ -1467,10 +1483,24 @@ function bindSettings(view, cfg) {
       } else {
         lines.push(row(null, '大模型（OpenAI 兼容）', '密钥未登记（docs/接入准备清单.md 第二节）'));
       }
+      // 4) HIS 对接层（export=导出数据模拟；api=真实拉取测试）
+      try {
+        const hs = await fetch('/api/his/status').then(r => r.json());
+        if (hs.mode === 'api') {
+          const pr = await fetch('/api/his/patient?pid=' + encodeURIComponent(PATIENTS[0].id)).then(r => r.json());
+          lines.push(row(pr.mode === 'api' && pr.patient, 'HIS 对接层（I-1）',
+            pr.mode === 'api' ? `实时拉取成功：${(pr.patient && pr.patient.name) || PATIENTS[0].id} · 检验 ${(pr.labs || []).length} 项 · 医嘱 ${(pr.orders || []).length} 条`
+              : 'api 模式但拉取未生效：' + (pr.note || pr.error || '未知')));
+        } else {
+          lines.push(row(null, 'HIS 对接层（I-1）', '导出数据模式（真实病案/HIS 导出模拟）；接口文档到位后在 config.json 登记 his 节即切换实时拉取'));
+        }
+      } catch (e) {
+        lines.push(row(false, 'HIS 对接层（I-1）', '状态获取失败：' + e.message));
+      }
     } catch (e) {
       lines.push(row(false, 'BFF 服务端', '离线：' + e.message + '（bash start.sh 启动）'));
     }
-    // 4) 数据层完整性（真实取数）
+    // 5) 数据层完整性（真实取数）
     try {
       const n = PATIENTS.length, m = OPD_PATIENTS.length;
       const rec = await fetch('/data_records/' + encodeURIComponent(PATIENTS[0].name) + '.json').then(r => r.json());

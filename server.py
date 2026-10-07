@@ -68,6 +68,76 @@ def cfg_status(c):
     }
 
 
+# ============================ HIS 对接层（M3 前置骨架）============================
+# 约定接口见 docs/接口与字段映射说明.md 第二节（I-1）：
+#   GET {baseUrl}/his/api/patient/{patientId}?visitId={visitId}
+#   Authorization: Bearer <token>
+#   响应：{ patient, labs, orders, vitals, history }
+# 配置（config.json，0600，token 明文只存服务器）：
+#   "his": { "mode": "export|api", "baseUrl": "...", "token": "...", "timeout": 8 }
+# mode=export（默认）：前端使用本地真实导出数据（js/data.js），本层只报状态；
+# mode=api：本层代理拉取并归一化，字段映射偏差在 his_normalize 一处修正。
+# 医院真实接口文档到位后：只改 his_normalize 内的字段映射（键名对不上的在那里翻译）。
+
+def his_cfg():
+    h = load_cfg().get('his') or {}
+    return {
+        'mode': str(h.get('mode') or 'export')[:16],
+        'baseUrl': str(h.get('baseUrl') or '').strip(),
+        'token': str(h.get('token') or '').strip(),
+        'timeout': min(max(int(h.get('timeout') or 8), 2), 30),
+    }
+
+
+def his_status(h):
+    return {'mode': h['mode'], 'baseUrl': h['baseUrl'], 'hasToken': bool(h['token'])}
+
+
+def his_normalize(raw):
+    """医院响应 → 内部结构（patient/labs/orders/vitals/history）。
+    键名已按文档约定；真实联调时若院内字典键名不同，在此处做一一翻译。"""
+    if not isinstance(raw, dict):
+        raise ValueError('HIS 响应不是 JSON 对象')
+    p = raw.get('patient') or {}
+    patient = {k: str(p.get(k) or '')[:64] for k in
+               ('id', 'name', 'sex', 'age', 'marriage', 'birthplace', 'ward', 'admittedAt', 'visitNo', 'allergies')}
+    labs = []
+    for l in (raw.get('labs') or [])[:100]:
+        if isinstance(l, dict) and l.get('item'):
+            labs.append({'item': str(l.get('item'))[:64], 'code': str(l.get('code') or '')[:32],
+                         'result': str(l.get('result') or '')[:64], 'unit': str(l.get('unit') or '')[:32],
+                         'flag': str(l.get('flag') or '')[:8], 'range': str(l.get('range') or '')[:64],
+                         'time': str(l.get('time') or '')[:32]})
+    orders = []
+    for o in (raw.get('orders') or [])[:100]:
+        if isinstance(o, dict) and o.get('text'):
+            orders.append({'text': str(o.get('text'))[:200], 'dose': str(o.get('dose') or '')[:64],
+                           'route': str(o.get('route') or '')[:32], 'freq': str(o.get('freq') or '')[:32]})
+    v = raw.get('vitals') or {}
+    vitals = {k: str(v.get(k) or '')[:32] for k in ('T', 'P', 'R', 'BP')}
+    history = []
+    for h2 in (raw.get('history') or [])[:50]:
+        if isinstance(h2, dict) and h2.get('date'):
+            history.append({'date': str(h2.get('date'))[:32], 'dept': str(h2.get('dept') or '')[:32],
+                            'dx': str(h2.get('dx') or '')[:128],
+                            'docs': [str(d)[:64] for d in (h2.get('docs') or [])[:30] if d]})
+    return {'patient': patient, 'labs': labs, 'orders': orders, 'vitals': vitals, 'history': history}
+
+
+def his_fetch_patient(h, pid, visit):
+    if h['mode'] != 'api':
+        return None  # 导出数据模式：前端用本地数据，服务端不拉取
+    if not (h['baseUrl'] and h['token']):
+        raise RuntimeError('HIS api 模式未配置 baseUrl/token')
+    import urllib.parse
+    url = h['baseUrl'].rstrip('/') + '/his/api/patient/' + urllib.parse.quote(str(pid), safe='')
+    if visit:
+        url += '?visitId=' + urllib.parse.quote(str(visit), safe='')
+    req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + h['token']})
+    with urllib.request.urlopen(req, timeout=h['timeout']) as r:
+        return his_normalize(json.loads(r.read().decode('utf-8')))
+
+
 # ============================ 存储层 ============================
 # 两个后端实现同一接口：add_audit / list_audit / put_archive / list_archives / clear / health
 # 接口返回的数据形状与 M2.0 SQLite 版完全一致，前端无感知。
@@ -351,6 +421,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/archives':
             self._json(200, STORE.list_archives())
             return
+        if path == '/api/his/status':
+            self._json(200, his_status(his_cfg()))
+            return
+        if path == '/api/his/patient':
+            m_pid = re.search(r'pid=([^&]+)', query)
+            m_vis = re.search(r'visit=([^&]+)', query)
+            h = his_cfg()
+            data = his_fetch_patient(h, m_pid.group(1) if m_pid else '', m_vis.group(1) if m_vis else '')
+            if data is None:
+                self._json(200, {'mode': 'export', 'note': '导出数据模式：前端使用本地真实导出数据'})
+                return
+            self._json(200, {'mode': 'api', **data})
+            return
         self._json(404, {'error': 'unknown api'})
 
     # ---------- POST ----------
@@ -398,6 +481,17 @@ class Handler(BaseHTTPRequestHandler):
                     v = str(llm.get(k) or '').strip()
                     if v:
                         dst[k] = v
+                his = data.get('his') or {}
+                if his:
+                    dst = c.setdefault('his', {})
+                    for k in ('mode', 'baseUrl', 'token'):
+                        v = str(his.get(k) or '').strip()
+                        if v:
+                            dst[k] = v[:256]
+                    try:
+                        dst['timeout'] = min(max(int(his.get('timeout') or 8), 2), 30)
+                    except Exception:
+                        pass
                 save_cfg(c)  # db 节（存储后端）不随浏览器配置改写，仅运维改 config.json/env
                 self._json(200, cfg_status(c))
                 return
