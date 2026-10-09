@@ -582,6 +582,35 @@ export const DEMO_BANNER = '真实数据环境 · 患者数据源自院内病历
         len(pats), adm['admittedAt'], bool(g['treatment'])))
 
 
+def build_masked(out_path):
+    """公网预览部署专用：在真实 data.js 基础上生成脱敏版（沿用 /mra/ 公网部署先例）。
+    脱敏口径：患者姓名→化名（全局替换，含所有引用处）；剥离真实音频/照片字段
+    （人声属生物识别信息、截图含患者隐私，不上公网）；医案号/临床事实保留
+    （与系统内置"脱敏开关"口径一致：仅展示层姓名替换）。本地真实数据不受影响。"""
+    src = io.open(OUT, encoding='utf-8').read()
+    ipd_names = ['刘倩倩', '张俊杰', '房传虎', '荣玉民', '闫秋荣', '麻玉兰']
+    opd_names = ['秦道秋', '付德山', '刘焕玉', '姜淑君', '陶奕可']
+    masked = src
+    for i, n in enumerate(ipd_names):
+        masked = masked.replace(n, '患者' + '甲乙丙丁戊己'[i])
+    for i, n in enumerate(opd_names):
+        masked = masked.replace(n, '门诊患者' + '甲乙丙丁戊'[i])
+    # 剥离住院录音对象块（多行 JSON 对象）
+    masked = re.sub(r'    "audio": \{[^{}]*\},\n', '', masked)
+    # 剥离门诊音频/照片字段（相对路径字符串）
+    masked = re.sub(r'    "audio": "opd/\d+\.m4a",\n', '', masked)
+    masked = re.sub(r'    "photo": "opd/\d+\.jpg",\n', '', masked)
+    # 数据头注明脱敏
+    masked = masked.replace(
+        ' * ⚠ 内部数据：仅限演示环境，禁止外传；正式部署前须脱敏',
+        ' * ⚠ 公网预览脱敏版：姓名已化名、真实音频/截图未随附；医案号与临床事实保留（仅展示层脱敏）')
+    io.open(out_path, 'w', encoding='utf-8').write(masked)
+    assert not any(n in masked for n in ipd_names + opd_names), '姓名脱敏不彻底'
+    assert 'opd/' not in masked or '"audio"' not in masked, '音频剥离不彻底'
+    print('MASK_OK -> %s（%d 位住院 + %d 位门诊患者化名，音频/照片已剥离）' % (
+        out_path, len(ipd_names), len(opd_names)))
+
+
 # ---------- 门诊（真实截图转录，无对话） ----------
 OPD = [
   {
@@ -677,4 +706,6 @@ OPD = [
 ]
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()
+    if '--mask' in sys.argv:
+        build_masked(OUT.replace('data.js', 'data.masked.js'))

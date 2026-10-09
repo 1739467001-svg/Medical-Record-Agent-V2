@@ -11,6 +11,7 @@
  *     data.cn.st.rt[].ws[].cw[].w 为词，st.type 0=最终 1=中间。
  * 无任何模拟/桩：连接、鉴权、分帧、解析全部真实；失败如实上报错误。
  * ============================================================ */
+import { api } from './config.js';
 
 /* AudioWorklet 源码（内联注册，无需独立文件）：
  * 输入任意采样率 Float32 → 线性重采样到 16k → Int16 累积成 640 采样（1280 字节）帧 → postFrame */
@@ -85,7 +86,7 @@ export async function startRtasrASR(handlers) {
   /* 1. 服务端取签名（密钥不出服务器） */
   let sign;
   try {
-    const r = await fetch('/api/asr/sign', {
+    const r = await fetch(api('/api/asr/sign'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ engine: 'iflytek' }),

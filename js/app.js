@@ -6,7 +6,7 @@
 import { HOSPITAL, SYSTEM_NAME, DOCTORS, PATIENTS, OPD_PATIENTS, AGENTS, SOURCE_META, OPD_NOTE, DEMO_BANNER, GOLD_CASE, ASR_TESTSET } from './data.js';
 import { ASR_ENGINES, engineReady, startWebSpeechASR } from './asr.js';
 import { startRtasrASR } from './rtasr.js';
-import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus, llmServerReady } from './config.js';
+import { getConfig, saveConfig, testLLM, asrConfigured, adoptServerStatus, llmServerReady, api } from './config.js';
 import { serverState, bootSync, postAudit, postArchive, postConfig, serverLLMTest } from './sync.js';
 import { llmGenActive, llmGenMode } from './llm.js';
 import { hisStatus, hisSourceLabel, enrichPatient } from './his.js';
@@ -569,7 +569,7 @@ function renderStep2(el, c, p) {
             ${c.recording ? '<button class="btn danger-outline" id="btn-stop" style="margin-top:12px">■ 结束录音</button>' : ''}
             ${p.audio ? `
             <div class="mt-16" style="width:100%">
-              <audio controls preload="none" src="${p.audio.file || p.audio}" style="width:100%;height:34px"></audio>
+              <audio controls preload="none" src="${p.audio.file ? api(p.audio.file) : p.audio}" style="width:100%;height:34px"></audio>
               <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.7">${p.audio.duration
                 ? `真实住院接诊原声回放（录音设备采集 · ${p.audio.duration} 秒）· 转写文本将由 ASR 引擎转写生成，系统不预置任何脚本——转写后问诊类字段（既往史/过敏史等）自动填充`
                 : '真实门诊原声回放（本例音频）· 转写文本将由正式引擎转写生成，系统不预置任何脚本'}</div>
@@ -1466,14 +1466,14 @@ function bindSettings(view, cfg) {
     const lines = [];
     // 1) BFF + 数据库
     try {
-      const h = await fetch('/api/health').then(r => r.json());
+      const h = await fetch(api('/api/health')).then(r => r.json());
       const db = h.db || {};
       lines.push(row(true, 'BFF 服务端', `在线 · ${h.server || ''}`));
       lines.push(row(!!db, '数据库后端', db.backend === 'mysql' ? `MySQL → ${db.host}/${db.database}` : `SQLite → data_server/${db.file || 'medagent.db'}（单文件可迁移）`));
       // 2) ASR 讯飞（已登记才做真实签名请求）
       if (h.iflytek && h.iflytek.hasKey && h.iflytek.hasSecret) {
         try {
-          const s = await fetch('/api/asr/sign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'iflytek' }) }).then(r => r.json());
+          const s = await fetch(api('/api/asr/sign'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ engine: 'iflytek' }) }).then(r => r.json());
           lines.push(row(!!s.signature, 'ASR · 科大讯飞（rtasr）', s.signature ? '签名服务端计算成功，通道就绪（录音页真实 WS 转写）' : '签名失败：' + (s.error || '未知')));
         } catch (e) { lines.push(row(false, 'ASR · 科大讯飞（rtasr）', '签名请求异常：' + e.message)); }
       } else {
@@ -1489,9 +1489,9 @@ function bindSettings(view, cfg) {
       }
       // 4) HIS 对接层（export=导出数据模拟；api=真实拉取测试）
       try {
-        const hs = await fetch('/api/his/status').then(r => r.json());
+        const hs = await fetch(api('/api/his/status')).then(r => r.json());
         if (hs.mode === 'api') {
-          const pr = await fetch('/api/his/patient?pid=' + encodeURIComponent(PATIENTS[0].id)).then(r => r.json());
+          const pr = await fetch(api('/api/his/patient') + '?pid=' + encodeURIComponent(PATIENTS[0].id)).then(r => r.json());
           lines.push(row(pr.mode === 'api' && pr.patient, 'HIS 对接层（I-1）',
             pr.mode === 'api' ? `实时拉取成功：${(pr.patient && pr.patient.name) || PATIENTS[0].id} · 检验 ${(pr.labs || []).length} 项 · 医嘱 ${(pr.orders || []).length} 条`
               : 'api 模式但拉取未生效：' + (pr.note || pr.error || '未知')));
@@ -1507,7 +1507,7 @@ function bindSettings(view, cfg) {
     // 5) 数据层完整性（真实取数）
     try {
       const n = PATIENTS.length, m = OPD_PATIENTS.length;
-      const rec = await fetch('/data_records/' + encodeURIComponent(PATIENTS[0].name) + '.json').then(r => r.json());
+      const rec = await fetch(api('/data_records/') + encodeURIComponent(PATIENTS[0].name) + '.json').then(r => r.json());
       lines.push(row(Array.isArray(rec) && rec.length > 0, '数据层', `住院患者 ${n} 位 · 门诊 ${m} 例 · ${PATIENTS[0].name} 病案文书 ${Array.isArray(rec) ? rec.length : 0} 份（data_records 真实原文）`));
     } catch (e) {
       lines.push(row(false, '数据层', 'data_records 读取失败：' + e.message));
@@ -1616,7 +1616,7 @@ function bindSettings(view, cfg) {
   view.querySelector('#btn-clear-demo').onclick = async () => {
     store.logs = []; store.archives = []; store.save();
     if (serverState.online) {
-      try { await fetch('/api/demo/clear', { method: 'POST' }); } catch (_) { /* 静默 */ }
+      try { await fetch(api('/api/demo/clear'), { method: 'POST' }); } catch (_) { /* 静默 */ }
     }
     audit('系统设置', '演示归档与留痕已清空' + (serverState.online ? '（含服务端）' : ''));
     toast('演示数据已清空');
@@ -1661,7 +1661,7 @@ function renderAudit() {
     view.querySelector('#f-action').onchange = e => { state.auditFilter = { ...f, action: e.target.value }; renderAudit(); };
     view.querySelector('#btn-clear').onclick = () => {
       store.logs = []; store.archives = []; store.save();
-      fetch('/api/demo/clear', { method: 'POST' }).catch(() => {});
+      fetch(api('/api/demo/clear'), { method: 'POST' }).catch(() => {});
       toast('演示日志已清空');
       render();
     };

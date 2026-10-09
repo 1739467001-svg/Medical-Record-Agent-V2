@@ -4,6 +4,8 @@
  * 本地操作异步上报（失败静默）。服务端离线自动降级本机模式。
  * ============================================================ */
 
+import { api } from './config.js';
+
 export const serverState = { online: false, info: null };
 
 async function jfetch(url, opts) {
@@ -13,12 +15,12 @@ async function jfetch(url, opts) {
 
 export async function bootSync() {
   try {
-    const h = await jfetch('/api/health');
+    const h = await jfetch(api('/api/health'));
     serverState.online = true;
     serverState.info = h;
     const [logs, arcs] = await Promise.all([
-      jfetch('/api/audit?limit=300').catch(() => []),
-      jfetch('/api/archives').catch(() => []),
+      jfetch(api('/api/audit?limit=300')).catch(() => []),
+      jfetch(api('/api/archives')).catch(() => []),
     ]);
     try {
       const local = JSON.parse(localStorage.getItem('medagent_archives') || '[]');
@@ -40,7 +42,7 @@ export async function bootSync() {
 
 export function postAudit(entries) {
   if (!serverState.online || !entries || !entries.length) return;
-  fetch('/api/audit', {
+  fetch(api('/api/audit'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entries }),
@@ -49,7 +51,7 @@ export function postAudit(entries) {
 
 export function postArchive(a) {
   if (!serverState.online) return Promise.resolve(false);
-  return fetch('/api/archives', {
+  return fetch(api('/api/archives'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(a),
@@ -58,7 +60,7 @@ export function postArchive(a) {
 
 export async function postConfig(cfg) {
   if (!serverState.online) return null;
-  return jfetch('/api/config', {
+  return jfetch(api('/api/config'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cfg),
@@ -66,7 +68,7 @@ export async function postConfig(cfg) {
 }
 
 export async function serverLLMTest() {
-  return jfetch('/api/llm/test', { method: 'POST', body: '{}' });
+  return jfetch(api('/api/llm/test'), { method: 'POST', body: '{}' });
 }
 
 /* 生成智能体的大模型调用（M2.1，经服务端代理 /api/llm/chat；密钥不出服务器）。
@@ -76,7 +78,7 @@ export async function serverLLMChat(body) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 40000);
   try {
-    const r = await fetch('/api/llm/chat', {
+    const r = await fetch(api('/api/llm/chat'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

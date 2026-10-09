@@ -22,3 +22,4 @@ js/data.js
 
 # 住院接诊真实录音（录音设备采集，真实患者音频）
 recordings/
+js/data.masked.js

@@ -7,6 +7,16 @@
 
 const KEY = 'medagent_cfg';
 
+/* 子路径部署支持（nginx 反代剥前缀场景，如 /medagent/）：
+ * BASE 从当前页面路径推导（/medagent/ 或 /medagent/index.html → '/medagent'，根部署 → ''）。
+ * 所有绝对路径请求（/api/... /recordings/...）经 api() 统一加前缀；
+ * 相对路径资源（css/js/data_records/opd）天然适配，无需处理。 */
+const BASE = typeof window !== 'undefined' && window.location
+  ? window.location.pathname.replace(/\/[^/]*$/, '')
+  : '';
+export const BASE_PATH = BASE;
+export const api = p => BASE + p;
+
 export function defaults() {
   return {
     asr: {

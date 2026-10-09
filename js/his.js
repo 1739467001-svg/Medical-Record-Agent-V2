@@ -12,6 +12,7 @@
  * ============================================================ */
 
 import { serverState } from './sync.js';
+import { api } from './config.js';
 
 let _statusCache = null;
 
@@ -20,7 +21,7 @@ export async function hisStatus(force) {
   if (_statusCache && !force) return _statusCache;
   if (!serverState.online) { _statusCache = { mode: 'offline' }; return _statusCache; }
   try {
-    _statusCache = await fetch('/api/his/status').then(r => r.json());
+    _statusCache = await fetch(api('/api/his/status')).then(r => r.json());
   } catch (_) {
     _statusCache = { mode: 'offline' };
   }
@@ -43,7 +44,7 @@ export async function enrichPatient(patient) {
   try {
     const q = '?pid=' + encodeURIComponent(patient.id) +
       (patient.visitNo ? '&visit=' + encodeURIComponent(patient.visitNo) : '');
-    const r = await fetch('/api/his/patient' + q);
+    const r = await fetch(api('/api/his/patient') + q);
     const j = await r.json();
     if (!r.ok) return { patient, source: 'export', error: (j && (j.error || j.note)) || ('HTTP ' + r.status) };
     if (j.mode !== 'api') return { patient, source: 'export' };
