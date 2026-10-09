@@ -189,6 +189,9 @@ async function generateDoc(docKey, patient, rulesObj) {
  */
 export async function prepareGeneration(patient, rulesFabrics) {
   if (!llmGenActive()) return { engine: 'rules' };
+  /* 录音优先患者（无病案素材）：完整问诊素材在未转写的录音里，仅有的 HIS 症状短句
+   * 不足以支撑大模型改写（避免扩写臆造）——转写接入后自动解除此守卫 */
+  if (!patient.record && !patient.gold && patient.rec) return { engine: 'rules' };
   try {
     const keys = patient.scene === 'opd' ? ['opd'] : ['adm', 'fc', 'dc'];
     const bundle = { engine: 'llm' };

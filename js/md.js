@@ -50,7 +50,7 @@ export function buildAdmissionMD({ patient, fields, doctor, meta }) {
   lines.push('## 家族史');
   lines.push(fieldLine(get('family')));
   lines.push('## 体格检查');
-  lines.push(`**生命体征**：${fmtVitals(r.vitals)} [系统带入]\n`);
+  lines.push(`**生命体征**：${((get('vitals') || {}).value || fmtVitals(r && r.vitals))} [系统带入]\n`);
   lines.push(fieldLine(get('physical')));
   lines.push('## 专科情况');
   lines.push(fieldLine(get('specialty')));
@@ -203,7 +203,7 @@ export function buildProfileMD({ patient, doctor, archiveLogs }) {
   lines.push('## 三、诊断演变与既往要点');
   const priorDx = patient.admissions.filter(a => !a.current).map(a => `${a.date} ${a.dx}`);
   lines.push(priorDx.length ? priorDx.map(d => `- ${d}`).join('\n') : '- 首次住院，无既往诊断');
-  if (/泼尼松/.test(patient.record.past)) lines.push('- ⚠ 长期糖皮质激素（醋酸泼尼松、甲钴胺）用药中，围手术期须评估');
+  if (patient.record && /泼尼松/.test(patient.record.past || '')) lines.push('- ⚠ 长期糖皮质激素（醋酸泼尼松、甲钴胺）用药中，围手术期须评估');
   if (/高血压/.test(patient.record.past)) lines.push('- 高血压病史，入院血压监测与降压用药（苯磺酸氨氯地平）已纳入医嘱');
   lines.push('');
   lines.push('## 四、本次住院概况');

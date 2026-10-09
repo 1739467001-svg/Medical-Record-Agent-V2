@@ -541,7 +541,7 @@ function hisPreview(p) {
       <div class="item"><div class="k">当前科室</div><div class="v">${esc(p.ward)}</div></div>
       <div class="item"><div class="k">拟诊</div><div class="v">${esc(p.dxPreview)}</div></div>
     </div>
-    <div class="mt-10" style="font-size:12.5px;color:var(--ink-soft)">既往住院 ${p.admissions.length - 1} 次（知识检索智能体将自动关联，详见患者画像）</div>
+    <div class="mt-10" style="font-size:12.5px;color:var(--ink-soft)">既往记录：住院 ${(p.admissions.filter(a => a.type === '住院' && !a.current).length)} 次 · 门诊 ${(p.admissions.filter(a => a.type === '门诊').length)} 次（知识检索智能体将自动关联，详见患者画像）${p.audio ? '<br>本次接诊含真实录音原声（录音设备采集），问诊录音步骤可回放' : ''}</div>
   </div></div>`;
 }
 
@@ -567,10 +567,12 @@ function renderStep2(el, c, p) {
               ${c.recording ? '正在录音（真实麦克风）…' : '点击开始真实录音；实时转写能力取决于所选引擎'}
             </div>
             ${c.recording ? '<button class="btn danger-outline" id="btn-stop" style="margin-top:12px">■ 结束录音</button>' : ''}
-            ${c.scene === 'opd' && p.audio ? `
+            ${p.audio ? `
             <div class="mt-16" style="width:100%">
-              <audio controls preload="none" src="${p.audio}" style="width:100%;height:34px"></audio>
-              <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.7">真实门诊原声回放（本例音频）· 转写文本将由正式引擎转写生成，系统不预置任何脚本</div>
+              <audio controls preload="none" src="${p.audio.file || p.audio}" style="width:100%;height:34px"></audio>
+              <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.7">${p.audio.duration
+                ? `真实住院接诊原声回放（录音设备采集 · ${p.audio.duration} 秒）· 转写文本将由 ASR 引擎转写生成，系统不预置任何脚本——转写后问诊类字段（既往史/过敏史等）自动填充`
+                : '真实门诊原声回放（本例音频）· 转写文本将由正式引擎转写生成，系统不预置任何脚本'}</div>
             </div>` : ''}
           </div>
         </div>
@@ -1083,7 +1085,7 @@ function renderProfile() {
         }
         return false;
       };
-      const past = p.record.past || '';
+      const past = (p.record && p.record.past) || '';
       const pts = [];
       if (positive(past, '高血压')) pts.push('高血压');
       if (positive(past, '糖尿病')) pts.push('糖尿病');
@@ -1101,7 +1103,7 @@ function renderProfile() {
     })()}
     <div class="row">
       <div class="card col">
-        <div class="card-head"><h3>就诊时间轴</h3><span class="hint">共 ${p.admissions.length} 次住院</span></div>
+        <div class="card-head"><h3>就诊时间轴</h3><span class="hint">住院 ${(p.admissions.filter(a => a.type !== '门诊').length)} 次 · 门诊 ${(p.admissions.filter(a => a.type === '门诊').length)} 次</span></div>
         <div class="card-body">
           <div class="timeline">
             ${p.admissions.map(a => `
@@ -1114,9 +1116,9 @@ function renderProfile() {
           <div class="divider-v" style="margin:14px 0"></div>
           <div style="font-size:13px;line-height:1.9">
             <b>本次住院概况</b><br>
-            主诉：${esc(p.record.chief)}<br>
-            初步诊断：${esc(p.record.diagnosis)}<br>
-            生命体征：<span class="num-serif">T ${p.record.vitals.T}℃ · P ${p.record.vitals.P} · R ${p.record.vitals.R} · BP ${p.record.vitals.BP}mmHg</span>
+            主诉：${esc(p.record ? p.record.chief : (p.rec ? p.rec.clinSymp : p.chiefView))}<br>
+            初步诊断：${esc(p.record ? p.record.diagnosis : (p.rec ? p.rec.clinDiag : p.dxPreview))}<br>
+            生命体征：<span class="num-serif">${p.record ? `T ${p.record.vitals.T}℃ · P ${p.record.vitals.P} · R ${p.record.vitals.R} · BP ${p.record.vitals.BP}mmHg` : (p.rec ? p.rec.vitalsStr : '—')}</span>${p.audio ? `<br>接诊录音：真实原声 ${p.audio.duration} 秒已存档（录音设备采集，待 ASR 转写）` : ''}
           </div>
         </div>
       </div>
@@ -1194,7 +1196,9 @@ async function loadDocViewer(view, p) {
       audit('查阅文书', `${N(p)} 真实病案原文：${d.sub}（${d.date || '无日期'}）`);
     });
   } catch (e) {
-    box.innerHTML = '<div class="empty-hint">文书数据加载失败：' + esc(e.message) + '</div>';
+    box.innerHTML = p.rec
+      ? '<div class="empty-hint" style="line-height:2.1">本次住院<b>病历尚未书写</b>（录音设备案例：真实接诊原声与 HIS 数据已就绪，AI 起草经医师确认后将生成首份文书）</div>'
+      : '<div class="empty-hint">文书数据加载失败：' + esc(e.message) + '</div>';
   }
 }
 

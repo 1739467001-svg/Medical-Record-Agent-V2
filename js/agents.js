@@ -23,16 +23,35 @@ function turnsFor(patient, fieldId) {
   return (patient.dialogue || []).filter(t => (t.maps || []).includes(fieldId));
 }
 
-/* 证据溯源：真实数据环境下的字段出处 = 病案文书原文（转写接入后恢复对话源） */
+/* 证据溯源：真实数据环境下的字段出处 */
 function evidenceOf(patient, fieldId) {
-  const src = patient.scene === 'opd' ? '门诊系统截图转录（真实数据）' : '病案文书《入院记录》原文（data_records）';
-  return `数据源：${src}，字段值取自院内真实数据`;
+  if (patient.scene === 'opd') return '数据源：门诊系统截图转录（真实数据），字段值取自院内真实数据';
+  if (patient.rec) return '数据源：真实 HIS 导出（检查申请/检验/医嘱/生命体征），字段值取自院内真实数据';
+  return '数据源：病案文书《入院记录》原文（data_records），字段值取自院内真实数据';
 }
 
 /* ---------- 各智能体产出 ---------- */
 
 /* 信息抽取：基于真实病案结构化字段的规则抽取（逐条可验证；M2.1 接入真实转写后增加对话源） */
 function runExtract(patient) {
+  /* 录音优先患者：从真实 HIS 临床要素抽取（检查申请症状/诊断 + 检验异常 + 职业信息） */
+  if (patient.rec && !patient.record && !patient.gold) {
+    const rec = patient.rec, labs = (patient.his && patient.his.labs) || [];
+    const facts = [];
+    if (rec.clinSymp) facts.push('主诉素材（HIS 症状）：' + rec.clinSymp);
+    if (rec.ctSymp && rec.ctSymp !== rec.clinSymp) facts.push('现病史素材（CT 申请叙述）：' + rec.ctSymp);
+    if (rec.clinDiag) facts.push('门诊拟诊（HIS 临床诊断）：' + rec.clinDiag);
+    if (rec.ctImpression) facts.push('CT 印象：' + rec.ctImpression);
+    if (rec.pathology) facts.push('病理回报：' + rec.pathology);
+    if (labs.length) facts.push('感染指标异常：' + labs.slice(0, 3).map(l => `${l.item} ${l.result}${l.unit}${l.flag}`).join('、'));
+    if (rec.job) facts.push('职业（HIS）：' + rec.job);
+    if (patient.audio) facts.push(`真实接诊录音 ${patient.audio.duration}s 已存档：待 ASR 转写后抽取既往史/过敏史等问诊要素`);
+    return {
+      summary: `从真实 HIS 临床要素中规则抽取医学要素 ${facts.length} 项${patient.audio ? '（录音待转写）' : ''}`,
+      detail: facts.join('；') || '—',
+      fields: [],
+    };
+  }
   const r = patient.record || patient.gold || null;
   if (!r) return { summary: '无结构化病案要素', detail: '', fields: [] };
   const text = (r.chief || '') + (r.present || '') + (r.past || '');
@@ -87,7 +106,7 @@ function runRetrieve(patient) {
   return {
     summary: isOPD
       ? `命中既往就诊 ${(patient.his && patient.his.visits ? patient.his.visits.length : 0)} 次 · 知识库条目 2 条`
-      : `命中既往住院 ${prior.length} 次 · 知识库条目 ${knowledge.length} 条`,
+      : `命中既往就诊 ${prior.length} 次 · 知识库条目 ${knowledge.length} 条`,
     detail: isOPD
       ? `既往就诊：${(patient.his && patient.his.visits || []).join('；') || '首次就诊'}。知识：${knowledge.map(k => k.title).join('、')}`
       : (prior.length
@@ -148,6 +167,67 @@ function runGenerate(patient) {
   fields.forEach(f => counts[f.source]++);
   return {
     summary: `组装入院记录字段 ${fields.length} 项（绿 ${counts.dlg} · 蓝 ${counts.his} · 灰 ${counts.norm} · 黄 ${counts.miss}）· 素材源：真实病案；同轮汇聚生成首次病程、出院记录字段组`,
+    detail: fields.map(f => f.label).join('、'),
+    fields,
+  };
+}
+
+/* ---------- 录音优先患者生成（录音设备案例：无病案文书，病历未书写） ----------
+ * 素材 = 真实 HIS（检查申请/CT/检验/医嘱/体征）+ 真实接诊录音（待 ASR 转写）。
+ * 分色原则不变：蓝 = HIS 真实带入（症状/诊断/体征/CT/检验）；
+ * 黄 = 问诊类字段（既往史/过敏史等）——录音已采集但转写未接入，留空待补，不臆造。 */
+function runGenerateRec(patient) {
+  const rec = patient.rec || {};
+  const labs = (patient.his && patient.his.labs) || [];
+  const AUD = patient.audio ? `（${patient.audio.duration}s 原声已存档，可回放）` : '';
+  const missEv = `真实接诊录音${AUD}已由录音设备采集，待 ASR 引擎转写后由生成智能体填充——不臆造`;
+  const dlg = (id, conf, value, ev) => ({
+    id, source: (value && value.trim()) ? 'dlg' : 'miss', value: value || '',
+    evidence: ev, confidence: value ? conf : 0, edited: false, confirmedBlank: false,
+  });
+
+  const ctAux = [
+    rec.ctImpression ? `全腹部CT平扫：${rec.ctDesc || ''}印象：${rec.ctImpression}` : '',
+    labs.length ? `检验异常 ${labs.length} 项：${labs.slice(0, 4).map(l => `${l.item} ${l.result}${l.unit}${l.flag === 'H' ? '↑' : '↓'}`).join('、')}${labs.length > 4 ? ' 等' : ''}` : '',
+  ].filter(Boolean).join('；');
+
+  const fields = [
+    {
+      id: 'chief', label: '主诉', source: 'his', value: rec.clinSymp || '',
+      evidence: 'HIS 检查申请主表·症状（真实数据，接诊医生录入）', confidence: 0.95, edited: false, confirmedBlank: false,
+    },
+    {
+      id: 'present', label: '现病史', source: 'his', value: rec.ctSymp || '',
+      evidence: 'HIS CT 检查申请·症状叙述（真实数据；完整现病史待录音转写补全）', confidence: 0.8, edited: false, confirmedBlank: false,
+    },
+    { ...dlg('past', 0.92, '', missEv), label: '既往史' },
+    { ...dlg('allergy', 0.93, '', missEv), label: '过敏史' },
+    { ...dlg('personal', 0.85, '', missEv), label: '个人史' },
+    { ...dlg('family', 0.9, '', missEv), label: '家族史' },
+    { ...dlg('marriage', 0.92, '', missEv), label: '婚姻史' },
+    {
+      id: 'vitals', label: '生命体征（T/P/R/BP）', source: 'his', value: rec.vitalsStr || '',
+      evidence: 'HIS 生命体征（入院时刻真实测量）', confidence: 1.0, edited: false, confirmedBlank: false,
+    },
+    {
+      id: 'physical', label: '体格检查（全身）', source: 'norm', value: NORM_PHYSICAL,
+      evidence: '入院记录模板规范查体所见，须医生核定（查体实测值待录音/补录）', confidence: 0.75, edited: false, confirmedBlank: false,
+    },
+    { ...dlg('specialty', 0.88, '', '专科查体所见待医师查体后录入（右下腹体征等）——不预填'), label: '专科情况' },
+    {
+      id: 'auxiliary', label: '辅助检查', source: 'his', value: ctAux,
+      evidence: 'HIS 检查结果（CT 印象 + 检验异常，真实数据）', confidence: 1.0, edited: false, confirmedBlank: false,
+    },
+    {
+      id: 'diagnosis', label: '初步诊断', source: 'his', value: rec.clinDiag || '',
+      evidence: `依据：HIS 检查申请临床诊断（${rec.clinDiag || ''}）+ CT 印象（${rec.ctImpression || ''}），真实数据`, confidence: 0.92, edited: false, confirmedBlank: false,
+    },
+  ];
+
+  const counts = { his: 0, dlg: 0, norm: 0, miss: 0 };
+  fields.forEach(f => counts[f.source]++);
+  return {
+    summary: `组装入院记录字段 ${fields.length} 项（蓝 ${counts.his} · 绿 ${counts.dlg} · 灰 ${counts.norm} · 黄 ${counts.miss}）· 素材源：真实 HIS + 接诊录音${patient.audio ? '（原声已存档待转写）' : ''}；同轮汇聚生成首次病程、出院记录字段组`,
     detail: fields.map(f => f.label).join('、'),
     fields,
   };
@@ -255,23 +335,23 @@ function runGenerateDC(patient, admFields) {
           id: 'dischargeDx', label: '出院诊断', source: 'dlg', confidence: 0.8, edited: false,
           value: diagnosis.value, evidence: '住院期间无新增诊断记录，暂与入院诊断一致，须医师核对',
         },
-    t
+    t && t.dischargeStatus
       ? {
           id: 'dischargeStatus', label: '出院情况', source: 'dlg', confidence: 0.85, edited: false,
           value: t.dischargeStatus, evidence: '文书汇聚：末次查房记录与出院当日评估',
         }
       : {
           id: 'dischargeStatus', label: '出院情况', source: 'miss', confidence: 0, edited: false,
-          value: '', evidence: '',
+          value: '', evidence: '患者尚在院（或出院评估未书写），出院情况待出院时补录——不预填',
         },
-    t
+    t && t.dischargeAdvice
       ? {
           id: 'dischargeAdvice', label: '出院医嘱', source: 'dlg', confidence: 0.85, edited: false,
           value: t.dischargeAdvice, evidence: '文书汇聚：出院医嘱单+医师口述，供核定',
         }
       : {
           id: 'dischargeAdvice', label: '出院医嘱', source: 'miss', confidence: 0, edited: false,
-          value: '', evidence: '',
+          value: '', evidence: '患者尚在院（或出院医嘱未书写），待出院时补录——不预填',
         },
   ];
   const counts = { dlg: 0, norm: 0, his: 0, miss: 0 };
@@ -401,6 +481,11 @@ export function runPipeline(patient, { onStep, onDone }) {
   /* 规则底稿（纯函数、确定性；LLM 增强的底值与失败兜底） */
   function rulesFabrics() {
     if (patient.scene === 'opd') return { opd: runGenerateOPD(patient) };
+    if (!patient.record && !patient.gold) {
+      // 录音优先患者（病历未书写）：入院记录走 HIS+录音待转写路径，FC/DC 同轮汇聚（治疗经过有真实手术病理依据）
+      const adm = runGenerateRec(patient);
+      return { adm, fc: runGenerateFC(patient, adm.fields), dc: runGenerateDC(patient, adm.fields) };
+    }
     const adm = runGenerate(patient);
     return {
       adm,

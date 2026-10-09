@@ -27,7 +27,7 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8801
 
 CT = {'.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
       '.js': 'text/javascript; charset=utf-8', '.m4a': 'audio/mp4',
-      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.mp3': 'audio/mpeg', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
       '.svg': 'image/svg+xml', '.md': 'text/markdown; charset=utf-8',
       '.json': 'application/json; charset=utf-8'}
 

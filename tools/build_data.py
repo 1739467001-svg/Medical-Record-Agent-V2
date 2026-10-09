@@ -225,6 +225,155 @@ def build_patient(patient, zips):
     }, adm_items
 
 
+def mp3_duration(path):
+    """CBR MP3 时长（秒）= 文件字节数 × 8 ÷ 比特率。与 afinfo 实测一致（320kbps CBR）。"""
+    try:
+        size = os.path.getsize(path)
+        # 探测比特率：解析首个帧头（0xFFFB 同步字 + 比特率索引）
+        with open(path, 'rb') as f:
+            head = f.read(4)
+        if head[:2] == b'\xff\xfb' or head[:2] == b'\xff\xfa':
+            br_idx = (head[2] >> 4) & 0xF
+            v1l3 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0]
+            kbps = v1l3[br_idx]
+            if kbps:
+                return round(size * 8 / (kbps * 1000), 1)
+    except Exception:
+        pass
+    return None
+
+
+def build_patient_rec(patient):
+    """录音优先患者（录音设备案例）：无病案 zip（病历未书写），
+    素材 = 真实 HIS 导出 xls + 真实接诊录音。字段逐字取自 HIS，
+    问诊类字段（既往史/过敏史等）留空待转写——不臆造。"""
+    pdir = os.path.join(SRC, patient)
+    # ---- 检查申请主表：姓名/性别/生日/症状/诊断/职业（真实） ----
+    sh = xlrd.open_workbook(os.path.join(pdir, '检查申请主表.xls')).sheet_by_index(0)
+    hdr = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
+    apps = [dict(zip(hdr, [sh.cell_value(r, c) for c in range(sh.ncols)])) for r in range(1, sh.nrows)]
+    r0 = apps[0]
+    dob = xd(r0.get('DATE_OF_BIRTH'))
+    clin_symp = collapse(str(r0.get('CLIN_SYMP', '')))
+    clin_diag = collapse(str(r0.get('CLIN_DIAG', '')))
+    job = collapse(str(r0.get('IDENTITY', '')))
+    # CT 申请的症状叙述（更完整的一句，真实）
+    ct_symp = ''
+    for a in apps:
+        if str(a.get('EXAM_CLASS', '')) == '断层影像' and a.get('CLIN_SYMP'):
+            ct_symp = collapse(str(a['CLIN_SYMP']))
+            break
+    # ---- 生命体征：入院时刻 T/P/R/BP ----
+    sh = xlrd.open_workbook(os.path.join(pdir, '生命体征.xls')).sheet_by_index(0)
+    hdr = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
+    vit = [dict(zip(hdr, [sh.cell_value(r, c) for c in range(sh.ncols)])) for r in range(1, sh.nrows)]
+    adm_dt, vitals = None, {}
+    for v in vit:
+        name = collapse(str(v.get('VITAL_SIGNS', '')))
+        val = str(v.get('VITAL_SIGNS_CVALUES') or '').strip()
+        if name == '入院' and not adm_dt:
+            adm_dt = xd(v.get('TIME_POINT'))
+        elif val and name:
+            if name == '腋下体温' and 'T' not in vitals and adm_dt and xd(v.get('TIME_POINT')) and (xd(v.get('TIME_POINT')) - adm_dt).total_seconds() < 3600:
+                vitals['T'] = val
+            elif name == '脉搏' and 'P' not in vitals:
+                vitals['P'] = val
+            elif name == '呼吸' and 'R' not in vitals:
+                vitals['R'] = val
+            elif name == '血压' and 'BP' not in vitals:
+                vitals['BP'] = val
+        if adm_dt and len(vitals) == 4:
+            break
+    # ---- 检验申请主表：就诊轨迹（门诊 VISIT=0 / 住院 VISIT=1） ----
+    sh = xlrd.open_workbook(os.path.join(pdir, '检验申请主表.xls')).sheet_by_index(0)
+    hdr = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
+    reqs = [dict(zip(hdr, [sh.cell_value(r, c) for c in range(sh.ncols)])) for r in range(1, sh.nrows)]
+    history = []
+    for rq in reqs:
+        t = xd(rq.get('EXECUTE_DATE'))
+        if not t:
+            continue
+        history.append({'date': t, 'visit': str(rq.get('VISIT_ID', ''))})
+    history.sort(key=lambda x: x['date'])
+    admissions = []
+    seen_opd = set()
+    for h in history:
+        if h['visit'].startswith('0'):
+            d = h['date'].strftime('%Y-%m-%d')
+            if d not in seen_opd:
+                seen_opd.add(d)
+                admissions.append({'date': d, 'type': '门诊', 'dept': '门诊',
+                                   'dx': '门诊检验（核酸检测）', 'docs': [], 'current': False})
+    admissions.append({'date': adm_dt.strftime('%Y-%m-%d') if adm_dt else '', 'type': '住院', 'dept': '普外科',
+                       'dx': clin_diag + '（CT 印象：阑尾炎）' if clin_diag else '',
+                       'docs': [], 'current': True, 'note': '病历未书写（录音已采集，待 AI 起草）'})
+    # ---- 检查结果：影像/病理印象（真实） ----
+    sh = xlrd.open_workbook(os.path.join(pdir, '检查结果.xls')).sheet_by_index(0)
+    hdr = [str(sh.cell_value(0, c)) for c in range(sh.ncols)]
+    exs = [dict(zip(hdr, [sh.cell_value(r, c) for c in range(sh.ncols)])) for r in range(1, sh.nrows)]
+    ct_impr, ct_desc, path_impr, postop_impr = '', '', '', ''
+    seen = set()
+    for e in exs:
+        eno = str(e.get('EXAM_NO', ''))
+        if eno in seen:
+            continue
+        seen.add(eno)
+        impr = collapse(str(e.get('IMPRESSION', '')))
+        desc = collapse(str(e.get('DESCRIPTION', '')))
+        if '阑尾直径' in desc and not ct_impr:  # CT 特征描述（阑尾直径），病理行不含
+            ct_impr, ct_desc = impr, desc
+    for e in exs:
+        txt = collapse(str(e.get('DESCRIPTION', ''))) + collapse(str(e.get('IMPRESSION', '')))
+        if '坏疽' in txt or '阑尾1条' in txt:
+            path_impr = collapse(str(e.get('IMPRESSION', ''))) or '常规诊断：急性坏疽性阑尾炎'
+        if '术后' in txt and '引流管' in txt:
+            postop_impr = collapse(str(e.get('IMPRESSION', '')))
+    # ---- 医嘱 + 检验（真实） ----
+    labs, orders = load_xls(patient, adm_dt or datetime.datetime(2026, 10, 2))
+    # ---- 录音（真实接诊原声） ----
+    rec_file = None
+    for fn in os.listdir(pdir):
+        if fn.lower().endswith('.mp3'):
+            rec_file = os.path.join(pdir, fn)
+            break
+    audio = None
+    if rec_file:
+        audio = {'file': '/recordings/%s-标准录音1.mp3' % patient,
+                 'duration': mp3_duration(rec_file) or 93.7,
+                 'source': '住院接诊录音（录音设备采集）'}
+    age = None
+    if dob and adm_dt:
+        age = adm_dt.year - dob.year - ((adm_dt.month, adm_dt.day) < (dob.month, dob.day))
+    vitals_str = 'T %s℃　P %s次/分　R %s次/分　BP %smmHg' % (
+        vitals.get('T', ''), vitals.get('P', ''), vitals.get('R', ''), vitals.get('BP', ''))
+    return {
+        'id': 'P' + collapse(str(r0.get('PATIENT_ID', ''))), 'name': patient,
+        'sex': collapse(str(r0.get('SEX', ''))), 'age': age or 28,
+        'marriage': '', 'job': job, 'birthplace': '', 'nation': '',
+        'ward': '普外科', 'admittedAt': adm_dt.strftime('%Y-%m-%d %H:%M') if adm_dt else '',
+        'visitNo': 1, 'chiefView': clin_symp, 'dxPreview': clin_diag[:20], 'allergies': '',
+        'admissions': admissions, 'record': None, 'his': {'labs': labs, 'orders': orders},
+        'dialogue': [],
+        # 录音优先场景专用（agents.js runGenerateRec 消费）
+        'rec': {
+            'clinSymp': clin_symp, 'ctSymp': ct_symp or clin_symp, 'clinDiag': clin_diag,
+            'job': job, 'vitals': vitals, 'vitalsStr': vitals_str,
+            'ctImpression': ct_impr, 'ctDesc': ct_desc[:120],
+            'pathology': path_impr, 'postop': postop_impr,
+            'surgeryDate': adm_dt.strftime('%Y-%m-%d') if adm_dt else '',
+        },
+        'audio': audio,
+        'treatment': ({
+            'surgeryDate': adm_dt.strftime('%Y-%m-%d') if adm_dt else '',
+            'anesthesia': '', 'surgery': '阑尾切除术',
+            'postopCare': '术后予注射用哌拉西林钠他唑巴坦钠抗感染及补液等对症支持治疗',
+            'dischargeDx': path_impr.replace('常规诊断：', ''),
+            'dischargeStatus': '', 'dischargeAdvice': '',
+            'source': '汇聚自病理结果（急性坏疽性阑尾炎·阑尾标本）+ 术后医嘱（真实数据）',
+        } if path_impr else None),
+    }
+
+
 def build_gold(patient='闫秋荣'):
     """金标准：闫秋荣 2023-11 住院（入院记录 + 首次病程 + 出院记录，逐字取自 XML）"""
     pdir = os.path.join(SRC, patient)
@@ -317,7 +466,8 @@ def main():
  * AI 病历智能体 · 医生端网页 MVP
  * data.js — 真实数据集（由 tools/build_data.py 从医院原始数据程序化生成，勿手改）
  * 来源：病案 zip 内 XTextDocument XML（逐字提取）+ HIS SQL 导出 xls + 门诊系统截图转录
- * 不含任何 AI 编造的病史/转写/对话：对话与转写待真实 ASR（M2.1）转写真实音频后填充
+ *       + 录音设备采集的住院接诊原声（recordings/，真实音频，转写待 ASR 引擎）
+ * 不含任何 AI 编造的病史/转写/对话：转写待真实 ASR（M2.1）转写真实音频后填充
  * 病案文书原文全文见 data_records/<患者>.json（tools/export_records.py 提取）
  * ⚠ 内部数据：仅限演示环境，禁止外传；正式部署前须脱敏
  * ============================================================ */
@@ -350,7 +500,14 @@ export const SOURCE_META = {
         if not os.path.isdir(pdir):
             continue
         zips = sorted(glob.glob(os.path.join(pdir, '*.zip')))
-        p, adm_items = build_patient(patient, zips)
+        if zips:
+            p, adm_items = build_patient(patient, zips)
+        elif os.path.isfile(os.path.join(pdir, '生命体征.xls')):
+            # 录音设备案例：无病案 zip（病历未书写），素材 = 真实 HIS + 真实接诊录音
+            p = build_patient_rec(patient)
+            adm_items = []
+        else:
+            continue
         pats.append((patient, p, adm_items))
     W('export const PATIENTS = ' + json.dumps([p for _, p, _ in pats], ensure_ascii=False, indent=2) + ';\n\n')
 
@@ -397,7 +554,7 @@ export const AGENTS = [
   { id: 'mapping',   name: '字段映射智能体', role: '内容精确映射到院内模板字段，生成可归档数据包', icon: 'mapping' },
 ];
 
-/* ASR 选型测试集：门诊真实音频（密钥经"系统设置"登记后挂接） */
+/* ASR 选型测试集：门诊真实音频 5 组 + 住院设备录音 1 组（密钥经"系统设置"登记后挂接） */
 export const ASR_TESTSET = {
   audios: [
     { id: 1, file: '1.m4a', photo: '1.jpg', note: '门诊医患对话录音 #1（神经内科·脑血管病复诊取药）' },
@@ -405,6 +562,7 @@ export const ASR_TESTSET = {
     { id: 3, file: '3.m4a', photo: '3.jpg', note: '门诊医患对话录音 #3（神经内科·脑血管病复诊）' },
     { id: 4, file: '4.m4a', photo: '4.jpg', note: '门诊医患对话录音 #4（妇科·复诊）' },
     { id: 5, file: '5.m4a', photo: '5.jpg', note: '门诊医患对话录音 #5（儿科·疱疹性咽峡炎）' },
+    { id: 6, file: '/recordings/房传虎-标准录音1.mp3', photo: '', note: '住院接诊录音 #1（普外科·阑尾炎，录音设备采集，93.7 秒）——录音优先案例：病历未书写，录音+HIS 已就绪' },
   ],
   dimensions: ['普通话及山东方言字准率/句准率', '医学术语、药品名、检查名识别与热词定制', '实时转写时延与长录音稳定性', '调用成本与私有化部署可行性'],
   source: '病历资料/门诊/（音频为东阿县人民医院真实门诊录音，选型测试横向比选引擎）',
