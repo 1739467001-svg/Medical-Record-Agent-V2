@@ -578,6 +578,8 @@ body.large-font .crumb small { display: none; }
 @media (max-width: 900px) {
   .row { flex-direction: column; }
   .row .col { width: 100%; }
+  /* 表格类卡片横向滚动（部分表格未包在 .card-body 内，直接挂 .card 下） */
+  .card { overflow-x: auto; }
 }
 
 /* 手机：侧栏转为底部导航栏 */
@@ -640,6 +642,18 @@ body.large-font .crumb small { display: none; }
   .audit-table, .pt-table { min-width: 620px; }
   .audit-table td, .audit-table th, .pt-table td, .pt-table th { white-space: nowrap; }
 
+  /* 接诊步骤条（5 步在手机放不下）：整体可横滑 + 收紧尺寸 */
+  .wizard-rail { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 5px; }
+  .wstep { gap: 6px; }
+  .wstep .n { width: 22px; height: 22px; font-size: 12px; }
+  .wstep .t { font-size: 11px; }
+  .wline { min-width: 12px; margin: 0 6px; }
+
+  /* iOS Safari：输入框字号 <16px 聚焦会强制放大页面——统一 16px */
+  input, textarea, select { font-size: 16px !important; }
+  /* 音频播放器触控目标加大 */
+  audio { height: 40px; }
+
   .modal { max-width: calc(100vw - 14px); max-height: 92vh; border-radius: 12px; }
   .modal-head { padding: 13px 15px; }
   .modal-body { padding: 14px 15px; }
@@ -654,6 +668,13 @@ body.large-font .crumb small { display: none; }
 /* 小屏手机（≤380）：统计卡单列 */
 @media (max-width: 380px) {
   .stat-grid { grid-template-columns: 1fr; }
+}
+
+/* 超小屏手机（≤480）：顶栏让位（演示横幅隐藏、按钮收紧），保证退出按钮可见 */
+@media (max-width: 480px) {
+  .demo-chip { display: none; }
+  .topbar .crumb { font-size: 13.5px; }
+  .topbar .btn { padding: 6px 6px; font-size: 11px; }
 }
 
 /* 未读页签标记 */
