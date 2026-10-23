@@ -76,7 +76,7 @@ export async function serverLLMTest() {
 export async function serverLLMChat(body) {
   if (!serverState.online) return { ok: false, error: '服务端离线（本机演示模式）' };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 40000);
+  const timer = setTimeout(() => ctrl.abort(), 90000);
   try {
     const r = await fetch(api('/api/llm/chat'), {
       method: 'POST',
@@ -88,7 +88,7 @@ export async function serverLLMChat(body) {
     if (!r.ok) return { ok: false, error: (j && (j.error || j.msg)) || ('HTTP ' + r.status) };
     return j;
   } catch (e) {
-    return { ok: false, error: e.name === 'AbortError' ? '生成超时（40s）' : (e.message || String(e)) };
+    return { ok: false, error: e.name === 'AbortError' ? '生成超时（90s）' : (e.message || String(e)) };
   } finally {
     clearTimeout(timer);
   }

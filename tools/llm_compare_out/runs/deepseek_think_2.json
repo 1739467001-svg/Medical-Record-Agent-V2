@@ -1,0 +1,89 @@
+{
+ "provider": "deepseek",
+ "model": "deepseek-v4-pro",
+ "mode": "think",
+ "run": 2,
+ "ms": 51695,
+ "ok": true,
+ "prompt_tokens": 121,
+ "completion_tokens": 4803,
+ "stop_reason": "end_turn",
+ "content_len": 231,
+ "valid_json": true,
+ "leak_markers": [],
+ "fields": {
+  "chief": "腹痛1天",
+  "present": "患者于昨天下午出现腹痛，后于当地镇上行小针注射治疗（具体药物不详），注射后症状短暂缓解；夜间2时许腹痛加重，伴恶心、呕吐2-3次，无发热、无心慌。为求进一步诊治来我院就诊，门诊以“阑尾炎”收入院。",
+  "past": "否认心脏病史及类似腹痛史。",
+  "allergy": "",
+  "family": "",
+  "marriage": "育有2子。",
+  "personal": "无饮酒史。",
+  "diagnosis": "阑尾炎"
+ },
+ "fact_hits": 12,
+ "facts": [
+  {
+   "label": "起病时间\"昨天下午/1天\"",
+   "ok": true
+  },
+  {
+   "label": "夜间两点加重",
+   "ok": true
+  },
+  {
+   "label": "恶心呕吐 2-3 次",
+   "ok": true
+  },
+  {
+   "label": "院外镇卫生院就诊",
+   "ok": true
+  },
+  {
+   "label": "院外注射(消炎针)治疗",
+   "ok": true
+  },
+  {
+   "label": "治疗后曾缓解",
+   "ok": true
+  },
+  {
+   "label": "无发热（否认发烧）",
+   "ok": true
+  },
+  {
+   "label": "既往体健/从未类似发作",
+   "ok": false
+  },
+  {
+   "label": "否认心脏病",
+   "ok": true
+  },
+  {
+   "label": "否认药物过敏",
+   "ok": false
+  },
+  {
+   "label": "无饮酒（这两天没喝）",
+   "ok": true
+  },
+  {
+   "label": "平时体格尚可",
+   "ok": false
+  },
+  {
+   "label": "育 2 子（两个男孩）",
+   "ok": true
+  },
+  {
+   "label": "主诉含\"腹痛\"",
+   "ok": true
+  },
+  {
+   "label": "初步诊断=阑尾炎",
+   "ok": true
+  }
+ ],
+ "hard_fabric": [],
+ "soft_fabric": []
+}

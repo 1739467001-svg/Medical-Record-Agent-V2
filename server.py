@@ -65,8 +65,87 @@ def cfg_status(c):
         'aliyun': {'appKey': asr.get('aliyun', {}).get('appKey', ''),
                    'hasKey': bool(asr.get('aliyun', {}).get('apiKey'))},
         'llm': {'baseUrl': llm.get('baseUrl', ''), 'model': llm.get('model', ''),
+                'apiFormat': llm.get('apiFormat', ''),
                 'hasKey': bool(llm.get('apiKey'))},
+        'llmProviders': {k: {'model': v.get('model', ''), 'apiFormat': v.get('apiFormat', ''),
+                             'hasKey': bool(v.get('apiKey'))}
+                         for k, v in (c.get('llmProviders') or {}).items()},
     }
+
+
+# ============================ LLM 统一调用层（双格式归一化）============================
+# 支持两类上游（config.json 的 llm / llmProviders 节，密钥明文只存服务器）：
+#   1) OpenAI 兼容：POST {baseUrl}/chat/completions，Authorization: Bearer
+#   2) Anthropic Messages：POST {baseUrl}/v1/messages，x-api-key + anthropic-version
+#      （DeepSeek 官方 /anthropic 端点与阿里云百炼 dashscope .../apps/anthropic 端点均为此格式）
+# 判定：apiFormat 显式指定（anthropic|openai），否则按 baseUrl 以 /anthropic 结尾自动识别。
+# Anthropic 响应归一化为 OpenAI 形态（choices[0].message.content）——前端 llm.js 契约不变；
+# content 数组仅拼接 type=text 的块（thinking 块不进入正文）。
+
+def llm_is_anthropic(llm):
+    fmt = str(llm.get('apiFormat') or '').strip().lower()
+    if fmt in ('anthropic', 'claude'):
+        return True
+    if fmt in ('openai', 'openai-compat', 'openai-compatible'):
+        return False
+    return str(llm.get('baseUrl') or '').rstrip('/').lower().endswith('/anthropic')
+
+
+def llm_call(llm, messages, temperature=0.2, max_tokens=4096, timeout=120):
+    """统一调用一个 LLM 上游；成功返回归一化 OpenAI 形态 dict，失败抛异常（由调用方转 502）。"""
+    if not (llm.get('baseUrl') and llm.get('apiKey')):
+        raise RuntimeError('LLM 未配置（baseUrl/apiKey 缺失）')
+    if llm_is_anthropic(llm):
+        system = '\n'.join(str(m.get('content') or '') for m in messages
+                           if m.get('role') == 'system').strip()
+        msgs = []
+        for m in messages:
+            if m.get('role') == 'system':
+                continue
+            role = 'assistant' if m.get('role') == 'assistant' else 'user'
+            msgs.append({'role': role, 'content': str(m.get('content') or '')})
+        body = {'model': llm.get('model') or 'default', 'max_tokens': max_tokens,
+                'messages': msgs, 'temperature': temperature}
+        # 思考控制：'off' 显式关闭（结构化 JSON 场景提速）；'on'/缺省 = 端点默认（推理型开思考）
+        if str(llm.get('thinking') or '').lower() == 'off':
+            body['thinking'] = {'type': 'disabled'}
+        if system:
+            body['system'] = system
+        req = urllib.request.Request(
+            llm['baseUrl'].rstrip('/') + '/v1/messages', data=json.dumps(body).encode('utf-8'),
+            method='POST',
+            headers={'x-api-key': llm['apiKey'], 'anthropic-version': '2023-06-01',
+                     'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out = json.loads(r.read().decode('utf-8'))
+        text = ''.join(b.get('text') or '' for b in out.get('content') or []
+                       if isinstance(b, dict) and b.get('type') == 'text')
+        usage = out.get('usage') or {}
+        return {'id': out.get('id', ''), 'model': out.get('model', ''),
+                'choices': [{'message': {'role': 'assistant', 'content': text},
+                             'finish_reason': out.get('stop_reason', '')}],
+                'usage': {'prompt_tokens': usage.get('input_tokens'),
+                          'completion_tokens': usage.get('output_tokens')}}
+    payload = json.dumps({'model': llm.get('model') or 'default', 'messages': messages,
+                          'temperature': temperature}).encode('utf-8')
+    req = urllib.request.Request(
+        llm['baseUrl'].rstrip('/') + '/chat/completions', data=payload, method='POST',
+        headers={'Authorization': 'Bearer ' + llm['apiKey'],
+                 'Content-Type': 'application/json'})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode('utf-8'))
+
+
+def llm_pick(cfg, data):
+    """按请求的 provider 键选 llmProviders 配置；未指定则用激活的 llm 节。"""
+    provs = cfg.get('llmProviders') or {}
+    llm = provs.get(str((data or {}).get('provider') or '')) or cfg.get('llm') or {}
+    override = {}
+    if (data or {}).get('model'):
+        override['model'] = str(data['model'])[:128]
+    if (data or {}).get('thinking') in ('on', 'off'):
+        override['thinking'] = data['thinking']
+    return {**llm, **override} if override else llm
 
 
 # ============================ HIS 对接层（M3 前置骨架）============================
@@ -502,38 +581,53 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {'ok': True})
                 return
             if path == '/api/llm/test':
-                llm = load_cfg().get('llm', {})
-                if not (llm.get('baseUrl') and llm.get('apiKey')):
+                cfg = load_cfg()
+                targets = []
+                for k, v in (cfg.get('llmProviders') or {}).items():
+                    targets.append((k, v))
+                if cfg.get('llm'):
+                    targets.append(('active', cfg['llm']))
+                if not targets:
                     self._json(200, {'ok': False, 'msg': '服务端尚未配置大模型（系统设置页填写并保存）'})
                     return
-                req = urllib.request.Request(llm['baseUrl'].rstrip('/') + '/models',
-                                             headers={'Authorization': 'Bearer ' + llm['apiKey']})
-                try:
-                    with urllib.request.urlopen(req, timeout=10) as r:
-                        self._json(200, {'ok': True, 'msg': '服务端代理连接成功（/models %s）' % r.status})
-                except urllib.error.HTTPError as e:
-                    self._json(200, {'ok': False, 'msg': '上游响应 %d：请核对地址与密钥' % e.code})
-                except Exception as e:
-                    self._json(200, {'ok': False, 'msg': '服务端代理无法连接：' + str(e)})
+                results = []
+                for name, llm in targets:
+                    try:
+                        t0 = time.time()
+                        out = llm_call(llm, [{'role': 'user',
+                                              'content': '连通性测试，请只回复两个字符：OK'}],
+                                      temperature=0, max_tokens=512,
+                                      timeout=min(int(llm.get('timeout') or 30), 60))
+                        txt = (out.get('choices') or [{}])[0].get('message', {}).get('content', '')
+                        results.append({'provider': name, 'model': llm.get('model', ''),
+                                        'ok': True, 'ms': int((time.time() - t0) * 1000),
+                                        'reply': txt[:40]})
+                    except Exception as e:
+                        results.append({'provider': name, 'model': llm.get('model', ''),
+                                        'ok': False, 'msg': str(e)[:200]})
+                ok_any = any(r['ok'] for r in results)
+                self._json(200, {'ok': ok_any, 'results': results,
+                                 'msg': '；'.join('%s：%s' % (r['provider'],
+                                     ('连接成功 %dms' % r['ms']) if r['ok'] else ('失败 ' + r.get('msg', '')))
+                                     for r in results)})
                 return
             if path == '/api/llm/chat':
-                llm = load_cfg().get('llm', {})
+                cfg = load_cfg()
+                data = self._body()
+                llm = llm_pick(cfg, data)
                 if not (llm.get('baseUrl') and llm.get('apiKey')):
                     self._json(503, {'error': 'LLM 未配置'})
                     return
-                data = self._body()
-                payload = json.dumps({
-                    'model': data.get('model') or llm.get('model') or 'default',
-                    'messages': data.get('messages') or [],
-                    'temperature': data.get('temperature', 0.2),
-                }).encode('utf-8')
-                req = urllib.request.Request(
-                    llm['baseUrl'].rstrip('/') + '/chat/completions', data=payload, method='POST',
-                    headers={'Authorization': 'Bearer ' + llm['apiKey'],
-                             'Content-Type': 'application/json'})
                 try:
-                    with urllib.request.urlopen(req, timeout=30) as r:
-                        out = json.loads(r.read().decode('utf-8'))
+                    timeout = min(max(int(llm.get('timeout') or 120), 10), 300)
+                    # 思考开启时 max_tokens 需覆盖"思考+正文"（实测 4096 会被思考块耗尽导致
+                    # 正文空串截断）；关闭思考时 4096 足够单文书 JSON。
+                    think_off = str(llm.get('thinking') or '').lower() == 'off'
+                    default_tokens = 4096 if think_off else 16384
+                    max_tokens = min(max(int(data.get('max_tokens') or default_tokens), 64), 32768)
+                    out = llm_call(llm, data.get('messages') or [],
+                                   temperature=float(data.get('temperature', 0.2)),
+                                   max_tokens=max_tokens, timeout=timeout)
                     self._json(200, {'ok': True, 'upstream': out})
                 except Exception as e:
                     self._json(502, {'ok': False, 'error': '上游调用失败：' + str(e)})

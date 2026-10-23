@@ -1,0 +1,8 @@
+{
+ "provider": "qwen",
+ "model": "qwen3.8-max",
+ "mode": "think",
+ "run": 3,
+ "ok": false,
+ "error": "HTTP Error 502: Bad Gateway"
+}

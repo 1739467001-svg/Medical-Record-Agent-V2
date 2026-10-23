@@ -78,7 +78,7 @@ const ELIGIBLE = {
 };
 
 /* ---------- 素材组装（真实数据环境：病案要素/HIS/转写/金标准要素，无任何虚构） ---------- */
-function materialOf(patient) {
+function materialOf(patient, docKey) {
   const parts = [];
   if (patient.scene === 'opd') {
     parts.push('场景：门诊接诊（素材=门诊系统截图转录的结构化要素，真实数据）');
@@ -99,6 +99,26 @@ function materialOf(patient) {
   delete factsCopy.vitals; // 体征在下方单列（客观字段，不参与改写但供模型理解语境）
   parts.push('【病案/HIS 结构化要素 JSON】' + JSON.stringify(factsCopy, null, 0));
   if (facts.vitals) parts.push('【生命体征（客观，禁止改写数值）】' + JSON.stringify(facts.vitals));
+  /* 录音优先患者：病案未书写，但 HIS 导出的客观要素（申请单/CT/体征）必须进素材——
+   * 与规则引擎蓝字段同源；入院/首次病程素材按"入院时刻快照"裁剪（术后病理/手术日期
+   * 属出院记录素材，提前出现即时序错误——对照 10.17 外部基线的同类缺陷）。 */
+  if (patient.rec) {
+    const rc = patient.rec;
+    const recFacts = {};
+    if (rc.clinSymp) recFacts['申请单主诉'] = rc.clinSymp;
+    if (rc.ctSymp) recFacts['申请单现病史'] = rc.ctSymp;
+    if (rc.clinDiag) recFacts['门诊诊断'] = rc.clinDiag;
+    if (rc.ctImpression) recFacts['CT印象'] = rc.ctImpression;
+    if (rc.ctDesc) recFacts['CT所见'] = rc.ctDesc;
+    if (rc.vitalsStr) recFacts['入院体征'] = rc.vitalsStr;
+    if (docKey === 'dc') {
+      if (rc.surgeryDate) recFacts['手术日期'] = rc.surgeryDate;
+      if (rc.pathology) recFacts['术后病理'] = rc.pathology;
+      if (rc.postop) recFacts['术后所见'] = rc.postop;
+    }
+    parts.push('【HIS 客观要素（真实导出，客观字段禁止改写数值；问诊类字段以转写对话为准）】' +
+               JSON.stringify(recFacts, null, 0));
+  }
   const h = patient.his || {};
   if (h.labs && h.labs.length) {
     parts.push('【HIS 检验异常（客观）】' + h.labs.map(l => `${l.item} ${l.result}${l.unit || ''}${l.flag || ''}`).join('；'));
@@ -114,13 +134,13 @@ function styleSample(patient) {
   return s ? `\n【本院书写风格样例（仅供文风参照，禁止照抄内容）】${s}…` : '';
 }
 
-function buildMessages(spec, patient) {
+function buildMessages(spec, patient, docKey) {
   const eligible = spec.fields;
   const hows = eligible.map(f => `- ${f.id}（${f.label}）：${f.how}`).join('\n');
   const template = {};
   eligible.forEach(f => { template[f.id] = ''; });
   const user =
-    materialOf(patient) + styleSample(patient) +
+    materialOf(patient, docKey) + styleSample(patient) +
     `\n【字段书写要求】\n${hows}` +
     `\n【输出 JSON 模板】${JSON.stringify(template)}`;
   const system =
@@ -173,7 +193,7 @@ function mergeFields(rulesFields, out, spec, docKey) {
 
 async function generateDoc(docKey, patient, rulesObj) {
   const spec = DOC_SPECS[docKey];
-  const messages = buildMessages(spec, patient);
+  const messages = buildMessages(spec, patient, docKey);
   const res = await serverLLMChat({ messages, temperature: 0.2 });
   if (!res || !res.ok) {
     return { ...rulesObj, tag: `· 生成引擎：规则引擎（大模型不可用：${(res && res.error) || '未知'}，已回落）`, llm: false };
