@@ -40,8 +40,8 @@ const DOC_SPECS = {
   fc: {
     title: '首次病程记录',
     fields: [
-      { id: 'caseFeatures', label: '病例特点', how: '条目式汇总：流行病学→既往史→现病史→查体→辅助检查，全部取自素材' },
-      { id: 'diagBasis', label: '诊断依据', how: '主诉 + 查体要点 + 辅助检查三条，与素材一致' },
+      { id: 'caseFeatures', label: '病例特点', how: '条目式汇总：流行病学→既往史→现病史→查体→辅助检查，全部取自素材；查体阳性体征仅限素材明示（体征数值/转写中医生明言的阳性发现），不得依诊断常识补写' },
+      { id: 'diagBasis', label: '诊断依据', how: '主诉 + 查体要点 + 辅助检查三条，与素材一致；查体所见仅限素材明示，禁止推断性体征' },
       { id: 'diffDiagnosis', label: '鉴别诊断', how: '依据素材疾病给出 2-3 个鉴别对象，每个含鉴别要点与依据（检验/体征）；素材不足以支持某鉴别项时省略该条' },
       { id: 'plan', label: '诊疗计划', how: '护理级别、完善检查、对症治疗、拟行方案；素材未提及的操作不写' },
     ],
@@ -222,14 +222,11 @@ export async function prepareGeneration(patient, rulesFabrics) {
   if (!patient.record && !patient.gold && patient.rec && !patient.transcript) return { engine: 'rules' };
   try {
     const keys = patient.scene === 'opd' ? ['opd'] : ['adm', 'fc', 'dc'];
+    /* 三文书并行请求（互不依赖；串行时 adm+fc+dc 时延相加，并行后取最慢一份） */
+    const results = await Promise.all(
+      keys.filter(k => rulesFabrics[k]).map(k => generateDoc(k, patient, rulesFabrics[k])));
     const bundle = { engine: 'llm' };
-    for (const k of keys) {
-      const rules = rulesFabrics[k];
-      if (!rules) continue;
-      // eslint-disable-next-line no-await-in-loop
-      const r = await generateDoc(k, patient, rules);
-      bundle[k] = r;
-    }
+    keys.filter(k => rulesFabrics[k]).forEach((k, i) => { bundle[k] = results[i]; });
     const any = keys.some(k => bundle[k] && bundle[k].llm);
     if (!any) return { engine: 'rules' };
     return bundle;

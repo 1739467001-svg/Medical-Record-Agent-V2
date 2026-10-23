@@ -130,7 +130,7 @@ function render() {
     <div class="sidebar-foot">
       <b>${state.doctor.name}</b> ${state.doctor.title}<br>
       工号 ${state.doctor.code} · ${state.doctor.dept}<br>
-      <span style="opacity:.75">${serverState.online ? 'BFF 在线 · 留痕/归档入库 SQLite' : '本机演示模式（服务端离线）'}</span>
+      <span style="opacity:.75">${serverState.online ? `BFF 在线 · 留痕/归档入库 ${serverState.info && serverState.info.db && serverState.info.db.backend === 'mysql' ? 'MySQL' : 'SQLite'}` : '本机演示模式（服务端离线）'}</span>
     </div>
   </aside>
   <div class="main">
