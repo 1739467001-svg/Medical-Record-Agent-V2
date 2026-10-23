@@ -7,7 +7,7 @@ echo "  AI 病历智能体 · 医生端（演示环境）"
 echo "  http://localhost:${PORT}"
 echo "=============================================="
 if [ -f server.py ]; then
-  echo "模式：BFF 服务端（留痕/归档入库 data_server/medagent.db，密钥仅存 data_server/config.json）"
+  echo "模式：BFF 服务端（MySQL 默认后端，留痕/归档入库；连接参数见 data_server/config.json 的 db.mysql 节）"
   echo "演示账号：张岩（普外科）/ 刘博（神经内科）｜ 停止：Ctrl+C"
   exec /usr/bin/python3 server.py "$PORT"
 fi

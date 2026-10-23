@@ -4,7 +4,7 @@
 AI 病历智能体 · BFF 服务（M2.0，方案见 docs/M2构建规划.md）
 仅用 Python 标准库（MySQL 驱动以纯 Python pymysql 随项目打包于 vendor/）；
 密钥只存服务器（data_server/config.json, 0600），浏览器仅持"已配置"标记；
-留痕/归档入库 SQLite（默认）或 MySQL（可选），大模型经本服务代理。
+留痕/归档入库 MySQL（默认，医院信息科标准运维）；SQLite 仅供单机测试/极端容灾（测试代码路径，不出现在用户可选配置中）。
 
 存储后端选择（运维级，浏览器不可配）：
   1. 环境变量 MEDAGENT_DB_BACKEND = mysql | sqlite（优先）
@@ -12,7 +12,8 @@ AI 病历智能体 · BFF 服务（M2.0，方案见 docs/M2构建规划.md）
      "db": {"backend": "mysql",
             "mysql": {"host": "127.0.0.1", "port": 3306,
                       "user": "medagent", "password": "***", "database": "medagent"}}
-  SQLite 最可迁移（单文件拷贝即搬家）；MySQL 面向生产（医院信息科标准运维/备份体系）。
+  MySQL 为生产与演示唯一默认后端（与医院信息科现成运维体系对齐）；
+  SQLite 仅作为测试后端保留在代码中（MEDAGENT_DB_BACKEND=sqlite 显式启用）。
   切换/迁移/备份见 docs/部署运维手册.md 第八章。
 """
 import base64, hashlib, hmac, json, os, re, sqlite3, sys, time
@@ -328,11 +329,12 @@ class MySQLStorage:
 
 
 def db_backend_cfg():
-    """后端选择：环境变量 MEDAGENT_DB_BACKEND 优先，其次 config.json 的 db 节。"""
+    """后端选择：环境变量 MEDAGENT_DB_BACKEND 优先，其次 config.json 的 db 节，默认 mysql（生产后端）。
+    SQLite 仅测试用途（显式 MEDAGENT_DB_BACKEND=sqlite 启用），不出现在用户可选配置中。"""
     c = load_cfg().get('db') or {}
     mysql = {'host': '127.0.0.1', 'port': 3306, 'user': 'medagent', 'password': '', 'database': 'medagent'}
     mysql.update(c.get('mysql') or {})
-    backend = os.environ.get('MEDAGENT_DB_BACKEND') or c.get('backend') or 'sqlite'
+    backend = os.environ.get('MEDAGENT_DB_BACKEND') or c.get('backend') or 'mysql'
     return backend, mysql
 
 

@@ -12,7 +12,7 @@ import { llmGenActive, llmGenMode } from './llm.js';
 import { hisStatus, hisSourceLabel, enrichPatient } from './his.js';
 import { runPipeline } from './agents.js';
 import { evaluateAgainstGold } from './eval.js';
-import { buildAdmissionMD, buildFCMD, buildDCMD, buildOPMD, buildProfileMD, buildEvalMD, downloadMD } from './md.js';
+import { buildAdmissionMD, buildFCMD, buildDCMD, buildOPMD, buildProfileMD, buildEvalMD, downloadMD, buildAdmissionXML, downloadXML } from './md.js';
 
 /* ---------- 持久化（MVP：localStorage；正式版替换服务端审计库） ---------- */
 const store = {
@@ -250,7 +250,9 @@ function enterConsult(pid, scene = 'ipd') {
     return true;
   }
   if (c && c.patientId && c.patientId !== pid && !c.archived && c.step > 1) {
-    const other = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId) || { name: '?' };
+    const other = c.scene === 'opd'
+      ? (OPD_PATIENTS.find(x => x.id === c.patientId) || { name: '?' })
+      : (findIPD(c.patientId) || { name: '?' });
     toast('当前有未完成的接诊（' + N(other) + '），请先完成或归档后再发起新接诊', 'err');
     return false;
   }
@@ -264,7 +266,7 @@ function enterConsult(pid, scene = 'ipd') {
 function resumeBanner() {
   const c = state.consult;
   if (!c || !c.patientId || c.step === 1) return '';
-  const p = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
+  const p = c.scene === 'opd' ? OPD_PATIENTS.find(x => x.id === c.patientId) : findIPD(c.patientId);
   if (!p) return '';
   const sceneLabel = c.scene === 'opd' ? '门诊病历' : '住院病历';
   const doneDocs = c.archivedDocs ? Object.keys(c.archivedDocs).length : 0;
@@ -290,10 +292,23 @@ function renderDashboard() {
       <div class="stat"><div class="num">${todayArchives}</div><div class="lbl">已归档病历（份）</div><div class="trend">我的操作记录可查</div></div>
     </div>
     <div class="card">
-      <div class="card-head"><h3>在院患者</h3><span class="hint">点击任意患者可直接查看其跨住院次画像</span></div>
+      <div class="card-head"><h3>在院患者</h3><span class="hint">点击任意患者可直接查看其跨住院次画像；新患者用"新增患者建档"</span></div>
       <table class="pt-table">
         <thead><tr><th>患者</th><th>病案号</th><th>第 N 次住院</th><th>入院主诉</th><th>初步诊断</th><th>病历状态</th><th style="width:120px">操作</th></tr></thead>
         <tbody>
+        ${(state.tempPatients || []).map(p => {
+          const ongoing = state.consult && state.consult.patientId === p.id && !state.consult.archived;
+          return `
+          <tr class="rowlink" style="background:var(--teal-soft,#eef6f6)">
+            <td><div class="pt-name"><div class="avatar">＋</div><div><b>${esc(N(p))}</b><small>${esc(p.sex)} · ${esc(p.age)}岁 · ${esc(p.ward)} · 手工建档（临时）</small></div></div></td>
+            <td class="num-serif">${esc(p.id.replace('P', ''))}</td>
+            <td class="num-serif">第 1 次</td>
+            <td>${esc(p.chiefView)}</td>
+            <td><span class="tag-dept">${esc(p.dxPreview)}</span></td>
+            <td>${ongoing ? '<span class="pill his"><span class="dot"></span>进行中</span>' : '<span class="pill miss"><span class="dot"></span>未开始</span>'}</td>
+            <td><button class="btn" data-consult="${p.id}">${ongoing ? '继续接诊' : '开始接诊'}</button></td>
+          </tr>`;
+        }).join('')}
         ${PATIENTS.map(p => {
           const n = store.archives.filter(a => a.pid === p.id).length;
           const ongoing = state.consult && state.consult.patientId === p.id && !state.consult.archived;
@@ -313,6 +328,18 @@ function renderDashboard() {
         }).join('')}
         </tbody>
       </table>
+    </div>
+    <div class="card mt-16">
+      <div class="card-head"><h3>新增患者建档</h3><span class="hint">新患者（无 HIS 档案时手工建档）→ 建档后直接进入问诊采集（录音/上传）</span></div>
+      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:12.5px">姓名<input id="np-name" placeholder="患者姓名" style="width:120px;margin-left:6px"></label>
+        <label style="font-size:12.5px">性别<select id="np-sex" style="width:70px;margin-left:6px"><option>男</option><option>女</option></select></label>
+        <label style="font-size:12.5px">年龄<input id="np-age" placeholder="岁" style="width:60px;margin-left:6px"></label>
+        <label style="font-size:12.5px">主诉<input id="np-chief" placeholder="如：腹痛1天" style="width:160px;margin-left:6px"></label>
+        <label style="font-size:12.5px">初步诊断<input id="np-dx" placeholder="如：阑尾炎" style="width:140px;margin-left:6px"></label>
+        <button class="btn primary" id="btn-newpt">建档并开始接诊 →</button>
+        <span class="muted" style="font-size:11.5px">手工建档标记为"临时"，不写入 HIS；正式 HIS 对接后由接口拉取替代</span>
+      </div>
     </div>`;
   view.querySelectorAll('[data-profile]').forEach(tr => tr.addEventListener('click', e => {
     if (e.target.closest('button')) return;
@@ -323,6 +350,25 @@ function renderDashboard() {
   }));
   const rb = view.querySelector('#resume-band');
   if (rb) rb.onclick = () => { state.view = 'consult'; render(); };
+  const btnNew = view.querySelector('#btn-newpt');
+  if (btnNew) btnNew.onclick = () => {
+    const g = id => (view.querySelector(id).value || '').trim();
+    const name = g('#np-name'), age = g('#np-age'), chief = g('#np-chief'), dx = g('#np-dx');
+    const sex = view.querySelector('#np-sex').value;
+    if (!name) { toast('请至少填写患者姓名', 'err'); return; }
+    state.tempPatients = state.tempPatients || [];
+    const id = 'PT' + Date.now().toString().slice(-6);
+    state.tempPatients.unshift({
+      id, name, sex, age: parseInt(age, 10) || 0, marriage: '', job: '', birthplace: '', nation: '',
+      ward: '普外科', admittedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      visitNo: 1, chiefView: chief || '—', dxPreview: dx || '—', allergies: '',
+      admissions: [{ date: new Date().toISOString().slice(0, 10), type: '住院', dept: '普外科', dx: dx || '—', docs: [], current: true, note: '手工建档（临时）' }],
+      record: null, his: { labs: [], orders: [] }, dialogue: [], temp: true,
+    });
+    audit('手工建档', `新增患者 ${name}（临时档案 ${id}）：${chief || '主诉未填'} · ${dx || '诊断未填'}；正式档案以 HIS 对接为准`);
+    toast('已建档（临时）——进入问诊采集', 'ok');
+    enterConsult(id, 'ipd');
+  };
 }
 
 /* ================= 管理总览（管理后台，数据全部来自系统真实操作记录） ================= */
@@ -408,6 +454,11 @@ function renderAdminDashboard() {
 }
 
 /* ================= 接诊向导 ================= */
+/* 住院患者查找：真实数据集 + 手工建档的临时患者（仅会话内，不入 HIS/数据文件） */
+function findIPD(id) {
+  return PATIENTS.find(x => x.id === id) || (state.tempPatients || []).find(x => x.id === id);
+}
+
 function newConsult(scene = 'ipd', patientId = null) {
   state.consult = {
     scene, patientId, step: 1, engine: 'webspeech',
@@ -431,7 +482,7 @@ function consultHead() {
 function renderConsult() {
   const c = state.consult;
   const view = document.getElementById('view');
-  const p = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
+  const p = c.scene === 'opd' ? OPD_PATIENTS.find(x => x.id === c.patientId) : findIPD(c.patientId);
   const isOPD = c.scene === 'opd';
   view.innerHTML = `<h1 class="page-title">接诊 · ${isOPD ? '门诊病历' : '住院病历'}生成</h1><p class="page-desc">${isOPD
     ? '按院内《门诊病历》模板生成草稿；音频为本次真实原声，可回放核对'
@@ -447,7 +498,7 @@ function renderConsult() {
 /* ---- Step 1 患者核对（住院/门诊双场景） ---- */
 function renderStep1(el, c) {
   const isOPD = c.scene === 'opd';
-  const LIST = isOPD ? OPD_PATIENTS : PATIENTS;
+  const LIST = isOPD ? OPD_PATIENTS : [...(state.tempPatients || []), ...PATIENTS];
   const sel = c.patientId ? LIST.find(p => p.id === c.patientId) : null;
   el.innerHTML = `
     <div class="card">
@@ -545,13 +596,13 @@ function hisPreview(p) {
   </div></div>`;
 }
 
-/* ---- Step 2 问诊录音（真实数据环境：无演示转写脚本） ---- */
+/* ---- Step 2 问诊采集（双入口：现场录音 / 上传音频·转写文本；右侧转写面板） ---- */
 function renderStep2(el, c, p) {
   const hasTranscript = c.turns.length && (c.turns[c.turns.length - 1].mandarin || c.transcriptText);
   el.innerHTML = `
     <div class="row">
       <div class="card col">
-        <div class="card-head"><h3>② 问诊录音</h3><span class="hint">正常问诊即可；可说方言，由语音引擎转成文字</span></div>
+        <div class="card-head"><h3>② 问诊采集</h3><span class="hint">两个入口：现场录音，或上传已录音频/转写文本</span></div>
         <div class="card-body">
           <div class="engine-row">
             ${ASR_ENGINES.map(e => `<span class="engine-chip ${c.engine === e.id ? 'sel' : ''} ${engineReady(e.id) ? '' : 'off'}" data-eng="${e.id}" title="${esc(e.desc)}">${esc(e.name)}${engineReady(e.id) ? (e.id === 'webspeech' ? ' · 就绪' : ' · 密钥就绪') : ' · 未配置'}</span>`).join('')}
@@ -564,21 +615,29 @@ function renderStep2(el, c, p) {
             <div class="rec-timer" id="rec-timer">${fmtTime(c.timer)}</div>
             <div class="wave ${c.recording ? '' : 'idle'}" id="wave">${waveBars()}</div>
             <div class="muted" style="font-size:12px;margin-top:10px" id="rec-hint">
-              ${c.recording ? '正在录音（真实麦克风）…' : '点击开始真实录音；实时转写能力取决于所选引擎'}
+              ${c.recording ? '正在录音（真实麦克风）…' : '入口一：点击开始现场录音；实时转写能力取决于所选引擎'}
             </div>
             ${c.recording ? '<button class="btn danger-outline" id="btn-stop" style="margin-top:12px">■ 结束录音</button>' : ''}
-            ${p.audio ? `
-            <div class="mt-16" style="width:100%">
-              <audio controls preload="none" src="${p.audio.file ? api(p.audio.file) : p.audio}" style="width:100%;height:34px"></audio>
-              <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.7">${p.audio.duration
-                ? `真实住院接诊原声回放（录音设备采集 · ${p.audio.duration} 秒）· 转写文本将由 ASR 引擎转写生成，系统不预置任何脚本——转写后问诊类字段（既往史/过敏史等）自动填充`
-                : '真实门诊原声回放（本例音频）· 转写文本将由正式引擎转写生成，系统不预置任何脚本'}</div>
-            </div>` : ''}
           </div>
+          <div style="border-top:1px dashed var(--line);margin:16px 0 0;padding-top:14px">
+            <div class="muted" style="font-size:12px;margin-bottom:8px">入口二：上传医生已录制的问诊音频或转写文本</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="btn" id="btn-upload" style="flex:1;min-width:180px">⬆ 上传音频 / 转写文本</button>
+              <input type="file" id="file-in" accept=".txt,.md,audio/*,.mp3,.m4a,.wav,.webm" style="display:none">
+            </div>
+            ${c.uploadedName ? `<div class="muted" style="font-size:12px;margin-top:8px">已接收：${esc(c.uploadedName)}${c.transcriptText ? '' : '（音频已存档可回放；如需转写出字，请在设置页登记转写引擎密钥，或直接上传 .txt 转写文本）'}</div>` : ''}
+          </div>
+          ${p.audio ? `
+          <div class="mt-16" style="width:100%">
+            <audio controls preload="none" src="${p.audio.file ? api(p.audio.file) : p.audio}" style="width:100%;height:34px"></audio>
+            <div class="muted" style="font-size:11.5px;margin-top:5px;line-height:1.7">${p.audio.duration
+              ? `真实住院接诊原声回放（录音设备采集 · ${p.audio.duration} 秒）· 可上传其转写文本，系统不预置任何脚本——转写后问诊类字段（既往史/过敏史等）自动填充`
+              : '真实门诊原声回放（本例音频）· 转写文本将由正式引擎转写生成，系统不预置任何脚本'}</div>
+          </div>` : ''}
         </div>
       </div>
       <div class="card col">
-        <div class="card-head"><h3>转写情况</h3><span class="hint">${c.transcriptText ? '已获得转写文本' : (c.audioUrl ? '录音完成 · 可回放' : '等待真实转写')}</span></div>
+        <div class="card-head"><h3>转写情况</h3><span class="hint">${c.transcriptText ? '已获得转写文本' : (c.audioUrl ? '录音完成 · 可回放' : '等待转写（录音或上传）')}</span></div>
         <div class="card-body" style="padding-top:8px">
           ${c.audioUrl ? `
           <div style="margin-bottom:12px">
@@ -586,12 +645,15 @@ function renderStep2(el, c, p) {
             <audio controls src="${c.audioUrl}" style="width:100%;height:34px"></audio>
           </div>` : ''}
           ${c.transcriptText
-            ? `<div style="font-size:13.8px;line-height:1.9;white-space:pre-wrap">${esc(c.transcriptText)}</div>`
+            ? `${c.asrSource === 'upload' && c.transcriptRaw && c.transcriptRaw !== c.transcriptText
+                ? `<div style="margin-bottom:10px"><span class="pill ${c.transcriptView === 'raw' ? 'his' : 'dlg'}" style="cursor:pointer" id="tg-raw" title="切换 ASR 原文 / 纠错后">${c.transcriptView === 'raw' ? 'ASR 原文' : '纠错后'}</span><span class="muted" style="font-size:11.5px;margin-left:6px">双重验证：语音引擎转写 + LLM 语义纠错（点击切换对照）</span></div>` : ''}
+              <div style="font-size:13.8px;line-height:1.9;white-space:pre-wrap">${esc(c.transcriptView === 'raw' ? (c.transcriptRaw || c.transcriptText) : c.transcriptText)}</div>`
             : `<div class="empty-hint" style="padding:22px 8px;line-height:2.1">
                  本系统为<b>真实数据环境</b>：不预置任何演示转写文本。<br>
-                 语音转写将在以下任一条件就绪后可用：<br>
-                 ① 选择"浏览器语音引擎"并授权麦克风（普通话）；<br>
-                 ② 在"系统设置"登记讯飞密钥（实时转写通道已接通：医疗领域优化 + 近场模式，签名由服务端计算）。<br>
+                 获得转写的三条路径：<br>
+                 ① 入口一：选择"浏览器语音引擎"现场录音（普通话）；<br>
+                 ② 入口一：在"系统设置"登记讯飞密钥后实时转写（医疗领域优化）；<br>
+                 ③ 入口二：上传转写好的 .txt 文本（推荐：ASR 原文 + 语义纠错双版本格式）。<br>
                  <span class="muted">当前生成素材源：真实病案文书与 HIS 数据（下一步自动汇聚）。</span>
                </div>`}
         </div>
@@ -647,6 +709,37 @@ function bindStep2(el, c, p) {
       finishRecording();
     }
   };
+
+  /* ---- 入口二：上传音频 / 转写文本 ---- */
+  const btnUpload = el.querySelector('#btn-upload');
+  const fileIn = el.querySelector('#file-in');
+  if (btnUpload && fileIn) {
+    btnUpload.onclick = () => fileIn.click();
+    fileIn.onchange = () => {
+      const f = fileIn.files && fileIn.files[0];
+      if (!f) return;
+      const isText = /\.(txt|md)$/i.test(f.name) || (f.type && f.type.startsWith('text/'));
+      if (isText) {
+        const rd = new FileReader();
+        rd.onload = () => ingestTranscript(String(rd.result || ''), f.name, c, p);
+        rd.onerror = () => toast('读取文本文件失败', 'err');
+        rd.readAsText(f, 'utf-8');
+      } else {
+        // 音频：存档 + 回放（转写需引擎密钥；明示降级，不虚构转写）
+        try { c.audioUrl = URL.createObjectURL(f); } catch (_) { c.audioUrl = null; }
+        c.uploadedName = f.name + '（音频）';
+        c.asrSource = 'upload-audio';
+        audit('上传音频', `患者 ${N(p)} · ${f.name}（${(f.size / 1024).toFixed(0)}KB）已存档；转写需引擎密钥或另行上传 .txt`);
+        renderConsult();
+        toast('音频已接收并可在右侧回放；如需出转写文字，请上传 .txt 转写文本（入口二）', 'info');
+      }
+      fileIn.value = '';
+    };
+  }
+
+  /* 转写原文/纠错后切换（双重验证对照，借鉴 ASR 原文+LLM 纠错双版本格式） */
+  const tgRaw = el.querySelector('#tg-raw');
+  if (tgRaw) tgRaw.onclick = () => { c.transcriptView = c.transcriptView === 'raw' ? 'fixed' : 'raw'; renderConsult(); };
 
   function startASR() {
     c.timerHandle = setInterval(() => {
@@ -728,6 +821,28 @@ function bindStep2(el, c, p) {
     toast(c.transcriptText ? '录音完成，已获得转写文本' : '录音完成（生成将以真实病案文书为素材源）');
   }
 
+  /* 上传文本 → 转写结果（支持 ASR 原文 + 纠错后双段格式，借鉴二次验证思路） */
+  function ingestTranscript(text, fname, cc, pp) {
+    const t = String(text || '').trim();
+    if (!t) { toast('文本文件为空', 'err'); return; }
+    let fixed = t, raw = '';
+    if (/^-{3,}\s*ASR 原文\s*-{3,}/m.test(t) && /-{3,}\s*纠错后\s*-{3,}/m.test(t)) {
+      const m = t.match(/^-{3,}\s*ASR 原文\s*-{3,}([\s\S]*?)-{3,}\s*纠错后\s*-{3,}([\s\S]*)$/m);
+      if (m) { raw = m[1].trim(); fixed = m[2].trim(); }
+    } else {
+      fixed = t.replace(/^#.*$/gm, '').trim() || t; // 去掉头部 # 元信息行
+    }
+    cc.transcriptText = fixed;
+    cc.transcriptRaw = raw;
+    cc.transcriptView = 'fixed';
+    cc.asrSource = 'upload';
+    cc.asrName = '上传转写文本（' + fname + '）';
+    cc.uploadedName = fname;
+    audit('上传转写文本', `患者 ${N(pp)} · ${fname}（${raw ? '含 ASR 原文 + 纠错后双版本，' : ''}${fixed.length} 字）`);
+    renderConsult();
+    toast('转写文本已接收' + (raw ? '（ASR 原文/纠错后可切换对照）' : '') + '，可直接进入智能体生成', 'ok');
+  }
+
   el.querySelector('#btn-to3').onclick = () => {
     c.step = 3;
     c.pipeSteps = [];
@@ -780,8 +895,14 @@ function renderStep3(el, c, p) {
 function startPipeline() {
   const c = state.consult;
   if (c.pipeHandle) return;
-  const p = c.patientSnapshot || (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
-  audit('启动多智能体', `${p.name} · ${c.scene === 'opd' ? '门诊病历' : '入院记录'} · 编排 6 智能体 · 生成引擎：${llmGenActive() ? '大模型' : '规则演示'}`);
+  const p = c.patientSnapshot || (c.scene === 'opd' ? OPD_PATIENTS.find(x => x.id === c.patientId) : findIPD(c.patientId));
+  /* 转写文本（现场录音或上传）注入患者快照：生成智能体以真实对话文本为素材，解除"录音待转写"守卫 */
+  if (c.transcriptText && p) {
+    p.transcript = c.transcriptText;
+    p.transcriptRaw = c.transcriptRaw || '';
+    p.transcriptSource = c.asrSource === 'upload' ? '上传转写文本（双重验证后）' : `现场录音实时转写（${c.asrName}）`;
+  }
+  audit('启动多智能体', `${p.name} · ${c.scene === 'opd' ? '门诊病历' : '入院记录'} · 编排 6 智能体 · 生成引擎：${llmGenActive() ? '大模型' : '规则演示'}${c.transcriptText ? ' · 素材含真实转写文本' : ''}`);
   c.pipeHandle = runPipeline(p, {
     onStep(agent, output, i, total) {
       c.pipeSteps[i] = output;
@@ -934,7 +1055,7 @@ function bindStep4(el, c) {
 
 /* ---- Step 5 签名归档 ---- */
 function renderStep5(el, c) {
-  const p = (c.scene === 'opd' ? OPD_PATIENTS : PATIENTS).find(x => x.id === c.patientId);
+  const p = c.scene === 'opd' ? OPD_PATIENTS.find(x => x.id === c.patientId) : findIPD(c.patientId);
   const isOPD = c.scene === 'opd';
   const docs = CONSULT_DOCS[isOPD ? 'opd' : 'ipd'];
   const docMeta = docs.find(d => d.id === c.docType);
@@ -998,7 +1119,11 @@ function renderStep5(el, c) {
 }
 
 function doArchive(c, p, sign) {
-  const meta = { asrName: c.asrName, archiveId: 'AR' + Date.now().toString().slice(-8) };
+  const meta = {
+    asrName: c.asrName, archiveId: 'AR' + Date.now().toString().slice(-8),
+    /* 转写来源信息随文书存档（XML"问诊转写附注"字段引用） */
+    transcript: c.transcriptText ? `${c.asrSource === 'upload' ? '上传转写文本' : '现场录音转写'}（${c.asrName}${c.transcriptRaw ? '，ASR原文+纠错后双重验证' : ''}）` : '',
+  };
   const isOPD = c.scene === 'opd';
   const docLabel = (CONSULT_DOCS[isOPD ? 'opd' : 'ipd'].find(d => d.id === c.docType) || {}).label;
   const F = (c.drafts && c.drafts[c.docType]) || [];
@@ -1017,14 +1142,20 @@ function doArchive(c, p, sign) {
   audit('签名归档', `${p.name} ${docLabel}已归档（批次 ${meta.archiveId}），签名：${sign}；MD 文档已生成`);
   c.archivedDocs[c.docType] = true;
   c.archived = true;
-  openMDModal(`${docLabel} · ${N(p)}`, md, `${N(p)}_${docLabel}_${meta.archiveId}.md`);
+  /* 入院记录额外生成院内 XTextDocument 格式 XML（上传医院 EMR 即成病历） */
+  let xml = null, xmlName = '';
+  if (!isOPD && c.docType === 'adm') {
+    xml = buildAdmissionXML({ patient: pOut, fields: F, doctor: { ...state.doctor, name: sign }, meta });
+    xmlName = `${N(p)}_入院记录_${meta.archiveId}.xml`;
+  }
+  openMDModal(`${docLabel} · ${N(p)}`, md, `${N(p)}_${docLabel}_${meta.archiveId}.md`, xml, xmlName);
   const allDone = Object.keys(c.archivedDocs).length >= (CONSULT_DOCS[isOPD ? 'opd' : 'ipd'].length);
   toast(allDone ? '本次接诊全部文书已归档' : '归档成功，可切换文书页签继续归档');
   render();
 }
 
-/* ---- MD 预览弹层 ---- */
-function openMDModal(title, md, filename) {
+/* ---- MD 预览弹层（入院记录附院内 XML 格式下载） ---- */
+function openMDModal(title, md, filename, xml, xmlName) {
   const mask = document.createElement('div');
   mask.className = 'modal-mask';
   mask.innerHTML = `<div class="modal">
@@ -1034,11 +1165,14 @@ function openMDModal(title, md, filename) {
       <button class="btn" data-print>🖨 打印</button>
       <button class="btn" data-copy>复制内容</button>
       <button class="btn primary" data-dl>下载 .md 文件</button>
+      ${xml ? '<button class="btn primary" data-dlxml style="background:var(--teal)">下载 XML（上传院内 EMR）</button>' : ''}
     </div>
   </div>`;
   document.body.appendChild(mask);
   mask.querySelector('[data-x]').onclick = () => mask.remove();
   mask.querySelector('[data-dl]').onclick = () => downloadMD(filename, md);
+  const dlxml = mask.querySelector('[data-dlxml]');
+  if (dlxml && xml) dlxml.onclick = () => { downloadXML(xmlName || '入院记录.xml', xml); toast('XML 已下载：上传医院 EMR 系统"病历导入"即形成病历', 'ok'); };
   mask.querySelector('[data-print]').onclick = () => {
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';

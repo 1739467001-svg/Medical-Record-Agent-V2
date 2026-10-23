@@ -1,0 +1,1216 @@
+{
+ "_meta": {
+  "source": "数据的表结构/表结构说明.docx（医院信息科提供的 HIS 数据字典）",
+  "parsed": "2026-10-22",
+  "tables": 8,
+  "fields_total": 157,
+  "usage": "① build_data.py xls 解析器列名对账；② llm.js 字段级提示词长度依据；③ M3 HIS 对接 I-1 拉取归一化映射；④ XML 导出字段字典",
+  "audit": {
+   "date": "2026-10-22",
+   "method": "房传虎 8 个 xls 列头逐一与字典字段名（不区分大小写）比对",
+   "result": "8 表字典字段在 xls 中全部命中（build_data.py 现用列名全部对得上官方字典）；xls 另有大量字典未列的本地扩展列（如 APPOINT_*/CP_ORDER_*/抗生素管理列），M3 对接以字典字段为契约、扩展列按需映射",
+   "match": {
+    "EXAM_MASTER": "43/43 字典字段全部命中（xls 另有 57 个本地扩展列）",
+    "EXAM_ITEMS": "5/5（xls 另有 BILLING_INDICATOR 等 4 列）",
+    "EXAM_REPORT": "8/9（DEVICE 未在 xls 出现；xls 另有 PRINT_FLAG）",
+    "LAB_TEST_MASTER": "30/30（xls 另有 31 个本地扩展列）",
+    "LAB_TEST_ITEMS": "4/4（xls 另有 5 列）",
+    "LAB_RESULT": "11/11（xls 另有 11 个本地扩展列）",
+    "VITAL_SIGNS_REC": "10/10（xls 另有 16 列，含 HIGH/LOW_MMHG 血压高低值——build_data 用的 VITAL_SIGNS_CVALUES 为字典\"新系统\"字段，正确）",
+    "ORDERS": "38/45（START/STOP_DATE_TIME 等命名变体 + xls 另有 41 个本地扩展列；build_data.py 用列索引 14/6/7/9/10/11/16 已实测对得上）"
+   }
+  }
+ },
+ "tables": {
+  "ORDERS": {
+   "cn": "医嘱",
+   "en": "ORDERS",
+   "fields": [
+    {
+     "cn": "病人标识号",
+     "en": "PATIENT_ID",
+     "type": "C",
+     "len": "10",
+     "note": "非空"
+    },
+    {
+     "cn": "病人本次住院标识",
+     "en": "VISIT_ID",
+     "type": "N",
+     "len": "2",
+     "note": "非空"
+    },
+    {
+     "cn": "医嘱序号",
+     "en": "ORDER_NO",
+     "type": "N",
+     "len": "4",
+     "note": "一个病人的所有医嘱独立分配序号，按时间顺序，从小到大排序"
+    },
+    {
+     "cn": "医嘱子序号",
+     "en": "ORDER_SUB_NO",
+     "type": "N",
+     "len": "2",
+     "note": "用于标识成组医嘱中的各医嘱项目，对独立的医嘱，为1，在成组医嘱内部，从1开始顺序排列"
+    },
+    {
+     "cn": "长期医嘱标志",
+     "en": "REPEAT_INDICATOR",
+     "type": "N",
+     "len": "1",
+     "note": "本医嘱是否长期医嘱，使用代码，1-长期，0-临时"
+    },
+    {
+     "cn": "医嘱类别",
+     "en": "ORDER_CLASS",
+     "type": "C",
+     "len": "1",
+     "note": "指定药疗、处置、护理、膳食、其它等类别，使用代码，见3.6医嘱类别字典"
+    },
+    {
+     "cn": "医嘱正文",
+     "en": "ORDER_TEXT",
+     "type": "C",
+     "len": "100",
+     "note": "医嘱内容"
+    },
+    {
+     "cn": "医嘱代码",
+     "en": "ORDER_CODE",
+     "type": "C",
+     "len": "20",
+     "note": "从临床角度对各类医嘱的每个项目分配一个代码，用于各系统间数据交换。如药品代码，检验项目代码等"
+    },
+    {
+     "cn": "药品一次使用剂量",
+     "en": "DOSAGE",
+     "type": "N",
+     "len": "8,4",
+     "note": ""
+    },
+    {
+     "cn": "剂量单位",
+     "en": "DOSAGE_UNITS",
+     "type": "C",
+     "len": "8",
+     "note": "规范描述，本系统定义，见4.20剂量单位字典"
+    },
+    {
+     "cn": "给药途径和方法",
+     "en": "ADMINISTRATION",
+     "type": "C",
+     "len": "16",
+     "note": "规范描述，是判断生成何种治疗单的依据，本系统定义，见4.17给药途径字典"
+    },
+    {
+     "cn": "起始日期及时间",
+     "en": "DURATION",
+     "type": "N",
+     "len": "2",
+     "note": "本医嘱起始日期及时间"
+    },
+    {
+     "cn": "停止日期及时间",
+     "en": "DURATION_UNITS",
+     "type": "C",
+     "len": "4",
+     "note": "本医嘱停止日期及时间"
+    },
+    {
+     "cn": "持续时间",
+     "en": "START_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "一次执行的持续时间"
+    },
+    {
+     "cn": "持续时间单位",
+     "en": "STOP_DATE_TIME_UNIT",
+     "type": "D",
+     "len": "",
+     "note": "使用规范描述，本系统定义，见4.31时间单位字典"
+    },
+    {
+     "cn": "执行频率描述",
+     "en": "FREQUENCY",
+     "type": "C",
+     "len": "16",
+     "note": "使用固定或固定格式的描述，如：3/日、TID，每xx分xx次，用户定义 ，见4.21医嘱执行频率字典"
+    },
+    {
+     "cn": "频率次数",
+     "en": "FREQ_COUNTER",
+     "type": "N",
+     "len": "2",
+     "note": "执行频率的次数部分"
+    },
+    {
+     "cn": "频率间隔",
+     "en": "FREQ_INTERVAL",
+     "type": "N",
+     "len": "2",
+     "note": "执行频率的间隔部分"
+    },
+    {
+     "cn": "频率间隔单位",
+     "en": "FREQ_INTERVAL_UNIT",
+     "type": "C",
+     "len": "4",
+     "note": "使用标准描述，本系统定义，见4.31时间单位字典"
+    },
+    {
+     "cn": "执行时间详细描述",
+     "en": "FREQ_DETAIL",
+     "type": "C",
+     "len": "80",
+     "note": "医嘱执行的详细时间表，用于对执行频率的补充，如：执行频率为3/日，补充为饭前执行或直接指定时间"
+    },
+    {
+     "cn": "护士执行时间",
+     "en": "PERFORM_SCHEDULE",
+     "type": "C",
+     "len": "16",
+     "note": "如：对3/日的时间表为8-12-6，由护士填入"
+    },
+    {
+     "cn": "执行结果",
+     "en": "PERFORM_RESULT",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "开医嘱科室",
+     "en": "ORDERING_DEPT",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "开医嘱医生",
+     "en": "DOCTOR",
+     "type": "C",
+     "len": "8",
+     "note": "医生姓名"
+    },
+    {
+     "cn": "停医嘱医生",
+     "en": "STOP_DOCTOR",
+     "type": "C",
+     "len": "8",
+     "note": "停止本医嘱的医生姓名"
+    },
+    {
+     "cn": "开医嘱校对护士",
+     "en": "NURSE",
+     "type": "C",
+     "len": "8",
+     "note": "医嘱开始时校对护士姓名"
+    },
+    {
+     "cn": "停医嘱校对护士",
+     "en": "STOP_NURSE",
+     "type": "C",
+     "len": "8",
+     "note": "医嘱停止时校对护士姓名"
+    },
+    {
+     "cn": "开医嘱录入日期及时间",
+     "en": "ENTER_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "开医嘱录入的日期及时间"
+    },
+    {
+     "cn": "停医嘱录入日期及时间",
+     "en": "STOP_ORDER_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "开医嘱录入的日期及时间"
+    },
+    {
+     "cn": "医嘱状态",
+     "en": "ORDER_STATUS",
+     "type": "C",
+     "len": "1",
+     "note": "反映医嘱的执行状态，如新开、校对、执行、停止等，使用代码，见4.19医嘱状态字典"
+    },
+    {
+     "cn": "药品计价属性",
+     "en": "DRUG_BILLING_ATTR",
+     "type": "N",
+     "len": "1",
+     "note": "反映药品是否计价，0-正常，1-自带药"
+    },
+    {
+     "cn": "计价属性",
+     "en": "BILLING_ATTR",
+     "type": "N",
+     "len": "1",
+     "note": "反映本条医嘱计价方面的信息。0-正常计价 1-自带药 2-需手工计价 3-不计价。由护士录入医嘱时，根据医嘱内容确定。"
+    },
+    {
+     "cn": "最后一次执行日期及时间",
+     "en": "LAST_PERFORM_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "对长期药品医嘱，由临床药局摆药时，将摆药的截止日期自动填入"
+    },
+    {
+     "cn": "最后一次计价日期及时间",
+     "en": "LAST_ACCTING_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "后台划价程序对本医嘱最近一次划价日期及时间。初始录入医嘱时，为空，由后台划价程序在每次划价后更新。"
+    },
+    {
+     "cn": "对应处方号",
+     "en": "CURRENT_PRESC_NO",
+     "type": "N",
+     "len": "5",
+     "note": ""
+    },
+    {
+     "cn": "医生代码",
+     "en": "DOCTOR_USER",
+     "type": "C",
+     "len": "16",
+     "note": ""
+    },
+    {
+     "cn": "校对时间",
+     "en": "VERIFY_DATA_TIME",
+     "type": "D",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "医嘱本打印标志",
+     "en": "ORDER_PRINT_INDICATOR",
+     "type": "N",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "转抄时间",
+     "en": "PROCESSION_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "转抄护士",
+     "en": "PROCESSION_NURSE",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "停止医嘱转抄时间",
+     "en": "STOP_PROCESSION_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "停止医嘱转抄护士",
+     "en": "STOP_PROCESSION_NURSE",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "作废时间",
+     "en": "CANCEL_DATE-TIME",
+     "type": "D",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "作废医生",
+     "en": "CANCEL-DOCTOR",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "检验申请号",
+     "en": "App_no",
+     "type": "varchar2",
+     "len": "20",
+     "note": ""
+    }
+   ],
+   "keys": [],
+   "comments": [
+    "注释：此表为在院病人医嘱表，该表面向已执行医嘱，兼顾临床需要和计价需要，兼顾药疗医嘱和其他类别的医嘱，其模型支持成组医嘱和父子医嘱。该表医嘱由病房分系统生成。"
+   ]
+  },
+  "VITAL_SIGNS_REC": {
+   "cn": "病人体症记录",
+   "en": "VITAL_SIGNS_REC",
+   "fields": [
+    {
+     "cn": "病人标识号",
+     "en": "PATIENT_ID",
+     "type": "C",
+     "len": "10",
+     "note": "非空"
+    },
+    {
+     "cn": "病人本次住院标识",
+     "en": "VISIT_ID",
+     "type": "N",
+     "len": "2",
+     "note": "非空"
+    },
+    {
+     "cn": "记录日期",
+     "en": "RECORDING_DATE",
+     "type": "D",
+     "len": "",
+     "note": ""
+    },
+    {
+     "cn": "时间点",
+     "en": "TIME_POINT",
+     "type": "D",
+     "len": "",
+     "note": "每日记录有固定的时间点，此处为时间，取24小时制"
+    },
+    {
+     "cn": "记录项目",
+     "en": "VITAL_SIGNS",
+     "type": "C",
+     "len": "16",
+     "note": "记录病人体症项目名称，如体温、脉搏等，允许用户临时增加项目"
+    },
+    {
+     "cn": "项目数值",
+     "en": "VITAL_SIGNS_VALUES",
+     "type": "N",
+     "len": "6,2",
+     "note": "老系统用"
+    },
+    {
+     "cn": "项目单位",
+     "en": "UNITS",
+     "type": "C",
+     "len": "8",
+     "note": "如千克、次、度等"
+    },
+    {
+     "cn": "类别代码",
+     "en": "CLASS_CODE",
+     "type": "C",
+     "len": "1",
+     "note": ""
+    },
+    {
+     "cn": "项目代码",
+     "en": "VITAL_CODE",
+     "type": "C",
+     "len": "4",
+     "note": ""
+    },
+    {
+     "cn": "项目数值",
+     "en": "VITAL_SIGNS_CVALUES",
+     "type": "C",
+     "len": "60",
+     "note": "新系统用"
+    }
+   ],
+   "keys": [],
+   "comments": [
+    "注释：本表用于描述病人体温单数据，即护理记录。每日每个病人有多个时间检查点，每次记录多个项目，每个时间点的每个项目连同项目名称、项目数值构成一条记录。该结构允许记录项目的变化。",
+    "由护士每日通过护士工作站录入。"
+   ]
+  },
+  "EXAM_MASTER": {
+   "cn": "检查主记录",
+   "en": "EXAM_MASTER",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "EXAM_NO",
+     "type": "C",
+     "len": "10",
+     "note": "每个检查申请的唯一标识，在整个系统范围内唯一。序号可采用集中分配方式，序号的组成可由申请日期加上一个顺序号或使用累计序号"
+    },
+    {
+     "cn": "检查号类别",
+     "en": "LOCAL_ID_CLASS",
+     "type": "C",
+     "len": "1",
+     "note": "每种检查，允许使用各自本地的标识号，如：超声号、X光号，本字段用于区分不同类型的本地标识号，由用户定义"
+    },
+    {
+     "cn": "检查标识号",
+     "en": "PATIENT_LOCAL_ID",
+     "type": "C",
+     "len": "10",
+     "note": "如：超声号、X光号，与检查标识号类别一起构成检查主索引的唯一标识"
+    },
+    {
+     "cn": "病人标识号",
+     "en": "PATIENT_ID",
+     "type": "C",
+     "len": "10",
+     "note": "不要求申请的病人必须具备主索引，但对具有主索引的病人使用此项"
+    },
+    {
+     "cn": "病人本次住院标识",
+     "en": "VISIT_ID",
+     "type": "N",
+     "len": "2",
+     "note": "对住院病人使用此项，门诊或外来病人可为空"
+    },
+    {
+     "cn": "姓名",
+     "en": "NAME",
+     "type": "C",
+     "len": "20",
+     "note": "病人姓名，非空"
+    },
+    {
+     "cn": "性别",
+     "en": "SEX",
+     "type": "C",
+     "len": "4",
+     "note": "病人性别，本系统定义，见1.1性别字典"
+    },
+    {
+     "cn": "出生日期",
+     "en": "DATE_OF_BIRTH",
+     "type": "D",
+     "len": "",
+     "note": "病人出生日期"
+    },
+    {
+     "cn": "检查类别",
+     "en": "EXAM_CLASS",
+     "type": "C",
+     "len": "6",
+     "note": "区分各类检查，使用规范名称，用户定义，见3.3检查类别字典"
+    },
+    {
+     "cn": "检查子类",
+     "en": "EXAM_SUB_CLASS",
+     "type": "C",
+     "len": "8",
+     "note": "区分一种检查类下的各子类，如超声类下的腹部、心脏、妇产等子类，使用规范名称，用户定义，见3.4检查子类字典"
+    },
+    {
+     "cn": "标本收到日期及时间",
+     "en": "SPM_RECVED_DATE",
+     "type": "D",
+     "len": "",
+     "note": "此项由执行科室填入"
+    },
+    {
+     "cn": "临床症状",
+     "en": "CLIN_SYMP",
+     "type": "C",
+     "len": "400",
+     "note": "正文描述"
+    },
+    {
+     "cn": "体征",
+     "en": "PHYS_SIGN",
+     "type": "C",
+     "len": "400",
+     "note": "正文描述"
+    },
+    {
+     "cn": "相关化验结果",
+     "en": "RELEVANT_LAB_TEST",
+     "type": "C",
+     "len": "200",
+     "note": "正文描述"
+    },
+    {
+     "cn": "其他诊断",
+     "en": "RELEVANT_DIAG",
+     "type": "C",
+     "len": "400",
+     "note": "依靠其他检查手段得到的有关诊断"
+    },
+    {
+     "cn": "临床诊断",
+     "en": "CLIN_DIAG",
+     "type": "C",
+     "len": "80",
+     "note": "主要临床诊断，正文描述"
+    },
+    {
+     "cn": "检查方式",
+     "en": "EXAM_MODE",
+     "type": "C",
+     "len": "1",
+     "note": "描述检查的场所，本系统定义，使用代码，A=病房 B=检查科室"
+    },
+    {
+     "cn": "检查分组",
+     "en": "EXAM_GROUP",
+     "type": "C",
+     "len": "16",
+     "note": "用于标识预约排队队列。每个队列称为一个检查组。它可能是一台仪器对应多个检查项目构成的排队队列，也可能是多台仪器对应一个检查项目构成的一个排队队列"
+    },
+    {
+     "cn": "使用仪器",
+     "en": "DEVICE",
+     "type": "C",
+     "len": "20",
+     "note": "指检查所使用的仪器名称和型号"
+    },
+    {
+     "cn": "执行科室",
+     "en": "PERFORMED_BY",
+     "type": "C",
+     "len": "8",
+     "note": "使用代码，用户定义，见2.6科室字典"
+    },
+    {
+     "cn": "病人来源",
+     "en": "PATIENT_SOURCE",
+     "type": "C",
+     "len": "1",
+     "note": "门诊、病房、外来，使用代码，见1.10病人来源字典"
+    },
+    {
+     "cn": "外来医疗单位名称",
+     "en": "FACILITY",
+     "type": "C",
+     "len": "20",
+     "note": "当病人为外来时，使用此字段表示病人所在医院或医疗机构名称。当病人来自本院时，留空"
+    },
+    {
+     "cn": "申请日期及时间",
+     "en": "REQ_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "提出此申请的日期及时间"
+    },
+    {
+     "cn": "申请科室",
+     "en": "REQ_DEPT",
+     "type": "C",
+     "len": "8",
+     "note": "使用代码，用户定义，见2.6科室字典"
+    },
+    {
+     "cn": "申请医生",
+     "en": "REQ_PHYSICIAN",
+     "type": "C",
+     "len": "8",
+     "note": "医生姓名"
+    },
+    {
+     "cn": "申请备注",
+     "en": "REQ_MEMO",
+     "type": "C",
+     "len": "60",
+     "note": "由申请者输入与申请有关的需另外说明的问题"
+    },
+    {
+     "cn": "预约日期及时间",
+     "en": "SCHEDULED_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "此字段由执行科室根据预约安排填写"
+    },
+    {
+     "cn": "注意事项",
+     "en": "NOTICE",
+     "type": "C",
+     "len": "400",
+     "note": "此字段由执行科室填写，填入与申请项目有关需注意的事项。该项与预约日期及时间一起构成对检查申请的答复。"
+    },
+    {
+     "cn": "检查日期及时间",
+     "en": "EXAM_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "实际执行检查的日期及时间"
+    },
+    {
+     "cn": "报告日期及时间",
+     "en": "REPORT_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "医生确认报告的日期及时间"
+    },
+    {
+     "cn": "操作者",
+     "en": "TECHNICIAN",
+     "type": "C",
+     "len": "8",
+     "note": "操作的技术人员姓名"
+    },
+    {
+     "cn": "报告者",
+     "en": "REPORTER",
+     "type": "C",
+     "len": "8",
+     "note": "确认报告的医生姓名"
+    },
+    {
+     "cn": "检查结果状态",
+     "en": "RESULT_STATUS",
+     "type": "C",
+     "len": "1",
+     "note": "反映申请的执行情况，如：收到申请、已执行、初步报告、确认报告等，初始时，由申请方填入，以后根据检查的执行情况，由执行者修改，使用代码，本系统定义，见3.7检查结果状态字典"
+    },
+    {
+     "cn": "费用",
+     "en": "COSTS",
+     "type": "N",
+     "len": "8,2",
+     "note": "按标准价格计算得到的本检查的费用，由执行科室划价后填入"
+    },
+    {
+     "cn": "应收费用",
+     "en": "CHARGES",
+     "type": "N",
+     "len": "8,2",
+     "note": "考虑费别因素后，计算得到的本检查的费用，由执行科室划价后填入"
+    },
+    {
+     "cn": "计价标志",
+     "en": "CHARGE_INDICATOR",
+     "type": "N",
+     "len": "22,0",
+     "note": "0-未计价 1-已计价，由收费系统或者检查系统在计费后填入"
+    },
+    {
+     "cn": "病人费用类别",
+     "en": "CHARGE_TYPE",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "身份",
+     "en": "IDENTITY",
+     "type": "C",
+     "len": "10",
+     "note": ""
+    },
+    {
+     "cn": "报告状态",
+     "en": "RPTSTATUS",
+     "type": "C",
+     "len": "50",
+     "note": "Pacs"
+    },
+    {
+     "cn": "打印状态",
+     "en": "PRINT_STATUS",
+     "type": "C",
+     "len": "50",
+     "note": "Pacs"
+    },
+    {
+     "cn": "检查子科室",
+     "en": "EXAM_SUBDEPT",
+     "type": "C",
+     "len": "10",
+     "note": ""
+    },
+    {
+     "cn": "确认医师",
+     "en": "CONFIRM_DOCT",
+     "type": "C",
+     "len": "8",
+     "note": ""
+    },
+    {
+     "cn": "学习号",
+     "en": "STUDY_UID",
+     "type": "C",
+     "len": "128",
+     "note": "Pacs"
+    }
+   ],
+   "keys": [
+    "主键：申请序号。"
+   ],
+   "comments": []
+  },
+  "EXAM_ITEMS": {
+   "cn": "检查项目记录",
+   "en": "EXAM_ITEMS",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "EXAM_NO",
+     "type": "C",
+     "len": "10",
+     "note": "在检查申请记录中分配的唯一标识"
+    },
+    {
+     "cn": "项目序号",
+     "en": "EXAM_ITEM_NO",
+     "type": "N",
+     "len": "2",
+     "note": "按医生开单的项目顺序，从1排列"
+    },
+    {
+     "cn": "检查项目",
+     "en": "EXAM_ITEM",
+     "type": "C",
+     "len": "100",
+     "note": "描述具体的检查项目，超声为具体检查项目，放射类检查称为检查部位，病理称为标本部位"
+    },
+    {
+     "cn": "项目代码",
+     "en": "EXAM_ITEM_CODE",
+     "type": "C",
+     "len": "20",
+     "note": "检查项目对应的代码，可为空，由用户定义，见4.7检查项目字典"
+    },
+    {
+     "cn": "费用",
+     "en": "COSTS",
+     "type": "N",
+     "len": "8,2",
+     "note": "按标准价格计算得到的本项目的费用，由执行科室划价后填入"
+    }
+   ],
+   "keys": [
+    "主键：申请序号、检查项目。"
+   ],
+   "comments": [
+    "注释：此表描述检查的具体项目，是检查申请和检查主记录的明细记录。"
+   ]
+  },
+  "EXAM_REPORT": {
+   "cn": "检查报告",
+   "en": "EXAM_REPORT",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "EXAM_NO",
+     "type": "C",
+     "len": "10",
+     "note": "在检查申请记录中分配的唯一标识"
+    },
+    {
+     "cn": "检查参数",
+     "en": "EXAM_PARA",
+     "type": "C",
+     "len": "1000",
+     "note": "检查过程中记录的有关内容"
+    },
+    {
+     "cn": "检查所见",
+     "en": "DESCRIPTION",
+     "type": "C",
+     "len": "2000",
+     "note": ""
+    },
+    {
+     "cn": "印象",
+     "en": "IMPRESSION",
+     "type": "C",
+     "len": "2000",
+     "note": ""
+    },
+    {
+     "cn": "建议",
+     "en": "RECOMMENDATION",
+     "type": "C",
+     "len": "2000",
+     "note": ""
+    },
+    {
+     "cn": "是否阳性",
+     "en": "IS_ABNORMAL",
+     "type": "C",
+     "len": "1",
+     "note": "1-阳性，即检查可能有病变，其他为阴性"
+    },
+    {
+     "cn": "使用仪器",
+     "en": "DEVICE",
+     "type": "C",
+     "len": "20",
+     "note": ""
+    },
+    {
+     "cn": "报告中图象编号",
+     "en": "USE_IMAGE",
+     "type": "C",
+     "len": "15",
+     "note": "如果报告涉及到图象，则此处给出图象的引用索引，格式：XXX(报告中的第一幅图对应该检查中第XXX幅图象，依次类推)，YYY…"
+    },
+    {
+     "cn": "备注",
+     "en": "MEMO",
+     "type": "C",
+     "len": "2000",
+     "note": "可以放各种检查的互相参考内容"
+    }
+   ],
+   "keys": [
+    "主键：申请序号。"
+   ],
+   "comments": [
+    "注释：此表描述检查报告内容，由检查执行科室生成。"
+   ]
+  },
+  "LAB_TEST_MASTER": {
+   "cn": "检验主记录",
+   "en": "LAB_TEST_MASTER",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "TEST_NO",
+     "type": "C",
+     "len": "10",
+     "note": "每个检验申请在整个系统范围内唯一标识"
+    },
+    {
+     "cn": "优先标志",
+     "en": "PRIORITY_INDICATOR",
+     "type": "N",
+     "len": "1",
+     "note": "反映此申请的紧急程度。0-普通 1-紧急"
+    },
+    {
+     "cn": "病人标识号",
+     "en": "PATIENT_ID",
+     "type": "C",
+     "len": "10",
+     "note": "对无主索引的病人可为空"
+    },
+    {
+     "cn": "本次住院标识",
+     "en": "VISIT_ID",
+     "type": "N",
+     "len": "2",
+     "note": "对门诊病人为空"
+    },
+    {
+     "cn": "工作单号",
+     "en": "WORKING_ID",
+     "type": "C",
+     "len": "6",
+     "note": "检验科室为内部管理而给每个申请分配的标识号，在整个系统范围及同一科室不同日期的申请间并不唯一"
+    },
+    {
+     "cn": "执行日期",
+     "en": "EXECUTE_DATE",
+     "type": "D",
+     "len": "",
+     "note": "准备执行日期"
+    },
+    {
+     "cn": "姓名",
+     "en": "NAME",
+     "type": "C",
+     "len": "20",
+     "note": "病人姓名，考虑到门诊病人或外医疗单位来的病人可能没有主索引"
+    },
+    {
+     "cn": "姓名拼音",
+     "en": "NAME_PHONETIC",
+     "type": "C",
+     "len": "16",
+     "note": "大写，字间用一空格间隔，超长截断"
+    },
+    {
+     "cn": "费别",
+     "en": "CHARGE_TYPE",
+     "type": "C",
+     "len": "8",
+     "note": "使用规范名称，由用户定义，见1.9费别字典"
+    },
+    {
+     "cn": "性别",
+     "en": "SEX",
+     "type": "C",
+     "len": "4",
+     "note": "使用规范名称，本系统定义，见1.14性别字典"
+    },
+    {
+     "cn": "年龄",
+     "en": "AGE",
+     "type": "N",
+     "len": "3",
+     "note": ""
+    },
+    {
+     "cn": "检验目的",
+     "en": "TEST_CAUSE",
+     "type": "C",
+     "len": "8",
+     "note": "正文描述，如查体等"
+    },
+    {
+     "cn": "临床诊断",
+     "en": "RELEVANT_CLINIC_DIAG",
+     "type": "C",
+     "len": "80",
+     "note": "诊断正文"
+    },
+    {
+     "cn": "标本",
+     "en": "SPECIMEN",
+     "type": "C",
+     "len": "8",
+     "note": "使用标准描述，如血、尿等"
+    },
+    {
+     "cn": "标本说明",
+     "en": "NOTES_FOR_SPCM",
+     "type": "C",
+     "len": "16",
+     "note": "标本采集的条件说明，如饭前、饭后一小时等。自由格式，由医生开检验单时说明"
+    },
+    {
+     "cn": "标本采样日期及时间",
+     "en": "SPCM_RECEIVED_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "由开单科室或执行科室填入"
+    },
+    {
+     "cn": "标本收到日期及时间",
+     "en": "SPCM_SAMPLE_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "由执行科室填入"
+    },
+    {
+     "cn": "申请日期及时间",
+     "en": "REQUESTED_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "医生开检验单的时间"
+    },
+    {
+     "cn": "申请科室",
+     "en": "ORDERING_DEPT",
+     "type": "C",
+     "len": "8",
+     "note": "科室代码，用户定义，如果为病房发出的申请，则为病房代码（非临床科室代码）"
+    },
+    {
+     "cn": "申请医生",
+     "en": "ORDERING_PROVIDER",
+     "type": "C",
+     "len": "8",
+     "note": "医生姓名"
+    },
+    {
+     "cn": "执行科室",
+     "en": "PERFORMED_BY",
+     "type": "C",
+     "len": "8",
+     "note": "检验科室代码"
+    },
+    {
+     "cn": "结果状态",
+     "en": "RESULT_STATUS",
+     "type": "C",
+     "len": "1",
+     "note": "反映申请的执行情况，如：收到标本、已执行、初步报告、确认报告等，初始时，由申请方填入，以后根据检查的执行情况，由执行者修改，使用代码，本系统定义，见3.7检查结果状态字典"
+    },
+    {
+     "cn": "报告日期及时间",
+     "en": "RESULTS_RPT_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "出结果报告的日期及时间"
+    },
+    {
+     "cn": "报告者",
+     "en": "TRANSCRIPTIONIST",
+     "type": "C",
+     "len": "8",
+     "note": "报告签发者或检验操作者"
+    },
+    {
+     "cn": "校对者",
+     "en": "VERIFIED_BY",
+     "type": "C",
+     "len": "8",
+     "note": "结果校对者"
+    },
+    {
+     "cn": "费用",
+     "en": "COSTS",
+     "type": "N",
+     "len": "8,2",
+     "note": "本检验单按价表中标准价格计算得到的总费用，由执行科室或后台划价程序填入"
+    },
+    {
+     "cn": "应收费用",
+     "en": "CHARGES",
+     "type": "N",
+     "len": "8,2",
+     "note": "考虑费别因素后，计算得到的本检验单的总费用，由执行科室或后台划价程序填入"
+    },
+    {
+     "cn": "计价标志",
+     "en": "BILLING_INDICATOR",
+     "type": "N",
+     "len": "1",
+     "note": "0-未计价 1-已计价，由收费程序使用"
+    },
+    {
+     "cn": "打印标志",
+     "en": "PRINT_INDICATOR",
+     "type": "N",
+     "len": "1",
+     "note": "0-未打印 1-已打印，由检验科室打印检验报告时使用"
+    },
+    {
+     "cn": "",
+     "en": "SUBJECT",
+     "type": "C",
+     "len": "40",
+     "note": ""
+    }
+   ],
+   "keys": [
+    "主键：申请序号"
+   ],
+   "comments": [
+    "注释：此表描述每张检验申请单。"
+   ]
+  },
+  "LAB_TEST_ITEMS": {
+   "cn": "检验项目",
+   "en": "LAB_TEST_ITEMS",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "TEST_NO",
+     "type": "C",
+     "len": "10",
+     "note": "对应检验申请主记录中的申请序号"
+    },
+    {
+     "cn": "项目序号",
+     "en": "ITEM_NO",
+     "type": "N",
+     "len": "2",
+     "note": "按医生开单的项目顺序，从1排列"
+    },
+    {
+     "cn": "项目名称",
+     "en": "ITEM_NAME",
+     "type": "C",
+     "len": "100",
+     "note": "检验项目名称"
+    },
+    {
+     "cn": "项目代码",
+     "en": "ITEM_CODE",
+     "type": "C",
+     "len": "20",
+     "note": "检验项目代码，见4.8检验项目字典"
+    }
+   ],
+   "keys": [
+    "主键：申请序号、项目序号"
+   ],
+   "comments": [
+    "注释：此表反映检验申请单的检验项目，是检验申请的明细记录。"
+   ]
+  },
+  "LAB_RESULT": {
+   "cn": "检验结果",
+   "en": "LAB_RESULT",
+   "fields": [
+    {
+     "cn": "申请序号",
+     "en": "TEST_NO",
+     "type": "C",
+     "len": "10",
+     "note": "对应检验申请主记录中的申请序号"
+    },
+    {
+     "cn": "项目序号",
+     "en": "ITEM_NO",
+     "type": "N",
+     "len": "2",
+     "note": "对应检验项目中的项目序号"
+    },
+    {
+     "cn": "打印序号",
+     "en": "PRINT_ORDER",
+     "type": "N",
+     "len": "4",
+     "note": "反映该报告项目在打印报告单时排列的次序，与检验报告项目字典序号保持一致，在一个检验申请内部，可能不连续"
+    },
+    {
+     "cn": "检验报告项目名称",
+     "en": "REPORT_ITEM_NAME",
+     "type": "C",
+     "len": "40",
+     "note": "此名称可能不同于申请项目名称"
+    },
+    {
+     "cn": "检验报告项目代码",
+     "en": "REPORT_ITEM_CODE",
+     "type": "C",
+     "len": "10",
+     "note": "报告项目对应的代码，见4.36检验报告项目字典"
+    },
+    {
+     "cn": "检验结果值",
+     "en": "RESULT",
+     "type": "C",
+     "len": "20",
+     "note": "正文描述，可以是定性描述，也可以是定量数值，对于没有值的项目不使用此字段"
+    },
+    {
+     "cn": "检验结果单位",
+     "en": "UNITS",
+     "type": "C",
+     "len": "8",
+     "note": "对检验结果为数值型的项目使用此字段"
+    },
+    {
+     "cn": "结果正常标志",
+     "en": "ABNORMAL_INDICATOR",
+     "type": "C",
+     "len": "1",
+     "note": "结果正常与否标志，N-正常 L-低 H-高"
+    },
+    {
+     "cn": "仪器编号",
+     "en": "INSTRUMENT_ID",
+     "type": "C",
+     "len": "8",
+     "note": "同检验仪器检验项目配置中定义的仪器编号，手工输入结果时为“手工”"
+    },
+    {
+     "cn": "检验日期及时间",
+     "en": "RESULT_DATE_TIME",
+     "type": "D",
+     "len": "",
+     "note": "结果产生的日期和时间。自动采集结果时由采集计算机生成，手工填写结果时由录入处理的计算机生成。"
+    },
+    {
+     "cn": "",
+     "en": "PRINT_CONTEXT",
+     "type": "C",
+     "len": "80",
+     "note": ""
+    }
+   ],
+   "keys": [
+    "主键：申请序号、项目序号、打印序号"
+   ],
+   "comments": [
+    "注释：此表用于记录检验结果。一个检验申请项目可以对应多个检验结果，如细菌培养可以培养出多种细菌，对复合项目，采用类似处理方法。"
+   ]
+  }
+ }
+}

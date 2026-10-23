@@ -77,20 +77,27 @@ const ELIGIBLE = {
   opd: ['opdChief', 'opdPresent', 'opdPast', 'opdFamily', 'opdPhysical', 'opdDx', 'opdAdvice'],
 };
 
-/* ---------- 素材组装（真实数据环境：病案要素/HIS/金标准要素，无任何虚构） ---------- */
+/* ---------- 素材组装（真实数据环境：病案要素/HIS/转写/金标准要素，无任何虚构） ---------- */
 function materialOf(patient) {
   const parts = [];
   if (patient.scene === 'opd') {
     parts.push('场景：门诊接诊（素材=门诊系统截图转录的结构化要素，真实数据）');
   } else if (patient.gold) {
     parts.push('场景：金标准评测（素材=该次住院病案的结构化要素，真实数据）');
+  } else if (patient.rec) {
+    parts.push('场景：住院接诊·录音优先（素材=真实 HIS 导出结构化要素 + 真实问诊转写文本）');
   } else {
     parts.push('场景：住院接诊（素材=真实病案文书《入院记录》结构化要素，data_records）');
+  }
+  /* 问诊转写（现场录音实时转写，或上传的"ASR 原文+纠错后"双重验证文本）：问诊类字段核心素材 */
+  if (patient.transcript) {
+    parts.push(`【问诊转写原文（${patient.transcriptSource || '真实转写'}；主诉/现病史/既往史/过敏史/个人史/家族史优先以此对话内容组织）】${patient.transcript}`);
+    if (patient.transcriptRaw) parts.push('【ASR 原文（纠错前，含方言口语）】' + patient.transcriptRaw);
   }
   const facts = patient.gold || patient.record || {};
   const factsCopy = { ...facts };
   delete factsCopy.vitals; // 体征在下方单列（客观字段，不参与改写但供模型理解语境）
-  parts.push('【病案结构化要素 JSON】' + JSON.stringify(factsCopy, null, 0));
+  parts.push('【病案/HIS 结构化要素 JSON】' + JSON.stringify(factsCopy, null, 0));
   if (facts.vitals) parts.push('【生命体征（客观，禁止改写数值）】' + JSON.stringify(facts.vitals));
   const h = patient.his || {};
   if (h.labs && h.labs.length) {
@@ -189,9 +196,10 @@ async function generateDoc(docKey, patient, rulesObj) {
  */
 export async function prepareGeneration(patient, rulesFabrics) {
   if (!llmGenActive()) return { engine: 'rules' };
-  /* 录音优先患者（无病案素材）：完整问诊素材在未转写的录音里，仅有的 HIS 症状短句
-   * 不足以支撑大模型改写（避免扩写臆造）——转写接入后自动解除此守卫 */
-  if (!patient.record && !patient.gold && patient.rec) return { engine: 'rules' };
+  /* 录音优先患者（无病案素材）：转写文本就绪（现场录音或上传）即解除守卫，
+   * 大模型以"真实转写对话 + HIS 结构化要素"为素材改写；无转写时仍走规则
+   * （仅有的 HIS 症状短句不足以支撑改写，避免扩写臆造） */
+  if (!patient.record && !patient.gold && patient.rec && !patient.transcript) return { engine: 'rules' };
   try {
     const keys = patient.scene === 'opd' ? ['opd'] : ['adm', 'fc', 'dc'];
     const bundle = { engine: 'llm' };

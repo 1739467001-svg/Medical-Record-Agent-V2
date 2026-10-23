@@ -289,3 +289,77 @@ export function downloadMD(filename, content) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
 }
+
+/* ============================================================
+ * 院内 XTextDocument 格式 XML 病历导出（验证阶段核心交付物）
+ * 医生下载后上传到医院 EMR 系统"对应部分"即形成病历（张老师链路）。
+ * 结构参照 data_records/ 187 份真实病案 XML（XTextDocument：
+ *   标题字段块 <DataSource> 与 <BindingPath> 绑定，正文段直接为文本节点）。
+ * 分色来源映射为 XML 备注属性（SourceNote），EMR 侧不识别即忽略、不破坏结构。
+ * ============================================================ */
+
+function xmlEsc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+}
+
+const SRC_XML = { his: '系统带入', dlg: '对话提炼', norm: '规范所见', miss: '待补充' };
+
+/* 字段块：与院内模板字段名一一对应（标题=字段中文名，值=医生核对后内容） */
+function fieldBlock(f, opts = {}) {
+  const v = (f.value || '').trim();
+  const src = SRC_XML[f.source] || '';
+  const note = opts.withSource ? ` SourceNote="${xmlEsc(src)}${f.edited ? '·医师已修改' : (f.gen === 'llm' ? '·AI生成' : '')}"` : '';
+  return `    <Field Name="${xmlEsc(f.label)}"${note}>\n      <Value>${xmlEsc(v)}</Value>\n    </Field>\n`;
+}
+
+export function buildAdmissionXML({ patient, fields, doctor, meta }) {
+  const get = id => fields.find(f => f.id === id);
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const head = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    `<XTextDocument DocumentType="入院记录" Hospital="${xmlEsc(HOSPITAL)}">`,
+    '  <Header>',
+    `    <Field Name="病案号"><Value>${xmlEsc(patient.id.replace('P', ''))}</Value></Field>`,
+    `    <Field Name="姓名"><Value>${xmlEsc(patient.name)}</Value></Field>`,
+    `    <Field Name="性别"><Value>${xmlEsc(patient.sex)}</Value></Field>`,
+    `    <Field Name="年龄"><Value>${xmlEsc(patient.age)}岁</Value></Field>`,
+    `    <Field Name="科别"><Value>${xmlEsc((patient.ward || '').split('·')[0])}</Value></Field>`,
+    `    <Field Name="第几次住院"><Value>${xmlEsc(patient.visitNo)}</Value></Field>`,
+    `    <Field Name="入院时间"><Value>${xmlEsc(patient.admittedAt)}</Value></Field>`,
+    `    <Field Name="记录时间"><Value>${xmlEsc(ts)}</Value></Field>`,
+    `    <Field Name="审核医师"><Value>${xmlEsc(doctor.name)}（${xmlEsc(doctor.title)}）</Value></Field>`,
+    '  </Header>',
+    '  <Body>',
+  ].join('\n');
+  const ids = ['chief', 'present', 'past', 'allergy', 'personal', 'marriage', 'family',
+    'vitals', 'physical', 'specialty', 'auxiliary', 'diagnosis'];
+  let body = '';
+  ids.forEach(id => {
+    const f = get(id);
+    if (f) body += fieldBlock(f, { withSource: true });
+  });
+  if (meta && meta.transcript) {
+    body += `    <Field Name="问诊转写附注" SourceNote="对话提炼">\n      <Value>（转写来源：${xmlEsc(meta.transcript)}）</Value>\n    </Field>\n`;
+  }
+  const tail = [
+    '  </Body>',
+    `  <Signature Doctor="${xmlEsc(doctor.name)}" DateTime="${xmlEsc(ts)}"/>`,
+    '</XTextDocument>',
+    '',
+  ].join('\n');
+  return head + '\n' + body + tail;
+}
+
+export function downloadXML(filename, content) {
+  const blob = new Blob([content], { type: 'application/xml;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 400);
+}
