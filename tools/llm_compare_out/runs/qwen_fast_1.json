@@ -3,25 +3,25 @@
  "model": "qwen3.8-max",
  "mode": "fast",
  "run": 1,
- "ms": 4169,
+ "ms": 4031,
  "ok": true,
- "prompt_tokens": 1354,
- "completion_tokens": 131,
+ "prompt_tokens": 330,
+ "completion_tokens": 127,
  "stop_reason": "end_turn",
- "content_len": 255,
+ "content_len": 250,
  "valid_json": true,
  "leak_markers": [],
  "fields": {
   "chief": "腹痛1天",
-  "present": "患者于1天前（昨天下午）无明显诱因出现腹痛，伴恶心、呕吐，呕吐2至3次，无心慌。遂至当地镇医院肌注药物治疗（具体药物不详），症状稍缓解，至夜间2点多腹痛加重，为求进一步诊治来我院就诊。",
-  "past": "既往体健，否认心脏病史。",
+  "present": "患者于1天前（昨天下午）无明显诱因出现腹痛，伴恶心、呕吐，呕吐2至3次，无心慌。遂至当地镇医院肌注药物治疗（具体药物不详），症状稍缓解，至夜间两点余腹痛加重。为求进一步诊治来我院就诊。",
+  "past": "否认心脏病史。",
   "allergy": "否认药物过敏史。",
   "family": "",
   "marriage": "育有2个男孩。",
-  "personal": "生于原籍、久居本地；否认疫区疫水接触史，无烟酒嗜好。",
+  "personal": "生于原籍、久居本地；否认疫区疫水接触史，近期无饮酒。",
   "diagnosis": "阑尾炎"
  },
- "fact_hits": 14,
+ "fact_hits": 12,
  "facts": [
   {
    "label": "起病时间\"昨天下午/1天\"",
@@ -53,7 +53,7 @@
   },
   {
    "label": "既往体健/从未类似发作",
-   "ok": true
+   "ok": false
   },
   {
    "label": "否认心脏病",
@@ -69,7 +69,7 @@
   },
   {
    "label": "平时体格尚可",
-   "ok": true
+   "ok": false
   },
   {
    "label": "育 2 子（两个男孩）",

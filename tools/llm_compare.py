@@ -26,10 +26,20 @@ PROVIDERS = [
     ('deepseek', 'deepseek-v4-pro'),
     ('deepseek-flash', 'deepseek-flash'),
     ('qwen', 'qwen3.8-max'),
+    ('qwen-flash', 'qwen3.8-flash'),
+    ('qwen-baolian', 'qwen3.8-max'),
 ]
 # 模式矩阵：think=推理型默认（开思考，max_tokens 16384 覆盖思考+正文）；
 #           fast=thinking disabled（结构化 JSON 场景，max_tokens 4096）
 MODES = [('think', None, 16384), ('fast', 'off', 4096)]
+
+# CLI 覆盖：--providers qwen,qwen-flash --modes fast（默认跑全矩阵）
+if len(sys.argv) > 2 and sys.argv[2] == '--providers':
+    _want = sys.argv[3].split(',')
+    PROVIDERS = [p for p in PROVIDERS if p[0] in _want]
+if len(sys.argv) > 4 and sys.argv[4] == '--modes':
+    _want_m = set(sys.argv[5].split(','))
+    MODES = [m for m in MODES if m[0] in _want_m]
 
 # ---- 房传虎 HIS 客观要素（摘自 js/data.js P2001390150，真实导出，勿改） ----
 REC = {

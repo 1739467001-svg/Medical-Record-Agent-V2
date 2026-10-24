@@ -1,0 +1,93 @@
+{
+ "provider": "qwen-flash",
+ "model": "qwen3.8-flash",
+ "mode": "fast",
+ "run": 2,
+ "ms": 4075,
+ "ok": true,
+ "prompt_tokens": 330,
+ "completion_tokens": 177,
+ "stop_reason": "end_turn",
+ "content_len": 310,
+ "valid_json": true,
+ "leak_markers": [],
+ "fields": {
+  "chief": "腹痛1天",
+  "present": "患者于昨天下午无明显诱因出现腹痛，伴恶心、呕吐2-3次。曾至当地卫生院行肌注治疗（具体药物不详），初期症状稍缓解，但今日凌晨2时许腹痛加重。病程中无发热，无心慌、胸闷等不适。发病以来精神尚可，未提及食欲、睡眠及大小便情况。",
+  "past": "既往体健，否认高血压、糖尿病、心脏病史；否认肝炎、结核等传染病史；否认手术、外伤、输血史。",
+  "allergy": "",
+  "family": "",
+  "marriage": "",
+  "personal": "生于原籍、久居本地；否认疫区疫水接触史，近期无饮酒史。",
+  "diagnosis": "阑尾炎"
+ },
+ "fact_hits": 13,
+ "facts": [
+  {
+   "label": "起病时间\"昨天下午/1天\"",
+   "ok": true
+  },
+  {
+   "label": "夜间两点加重",
+   "ok": true
+  },
+  {
+   "label": "恶心呕吐 2-3 次",
+   "ok": true
+  },
+  {
+   "label": "院外镇卫生院就诊",
+   "ok": true
+  },
+  {
+   "label": "院外注射(消炎针)治疗",
+   "ok": true
+  },
+  {
+   "label": "治疗后曾缓解",
+   "ok": true
+  },
+  {
+   "label": "无发热（否认发烧）",
+   "ok": true
+  },
+  {
+   "label": "既往体健/从未类似发作",
+   "ok": true
+  },
+  {
+   "label": "否认心脏病",
+   "ok": true
+  },
+  {
+   "label": "否认药物过敏",
+   "ok": false
+  },
+  {
+   "label": "无饮酒（这两天没喝）",
+   "ok": true
+  },
+  {
+   "label": "平时体格尚可",
+   "ok": true
+  },
+  {
+   "label": "育 2 子（两个男孩）",
+   "ok": false
+  },
+  {
+   "label": "主诉含\"腹痛\"",
+   "ok": true
+  },
+  {
+   "label": "初步诊断=阑尾炎",
+   "ok": true
+  }
+ ],
+ "hard_fabric": [],
+ "soft_fabric": [
+  "否认高血压/糖尿病/冠心病",
+  "否认肝炎/结核",
+  "手术/外伤/输血史表述"
+ ]
+}

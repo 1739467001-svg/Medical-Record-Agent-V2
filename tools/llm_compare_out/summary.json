@@ -1,113 +1,19 @@
 {
- "ts": "2026-10-24 00:08:20 (reval)",
+ "ts": "2026-10-24 20:00:57",
  "runs": 3,
  "providers": {
-  "deepseek-flash:fast": {
-   "model": "deepseek-flash",
-   "success": 3,
-   "valid_json": 3,
-   "leak_runs": 0,
-   "avg_ms": 1755,
-   "avg_prompt_tokens": 555,
-   "avg_completion_tokens": 149,
-   "fact_hits_by_run": [
-    13,
-    11,
-    12
-   ],
-   "avg_fact_hits": 12.0,
-   "hard_fabric_all": [],
-   "soft_fabric_by_run": [
-    0,
-    0,
-    1
-   ],
-   "soft_fabric_detail": [
-    "手术/外伤/输血史表述"
-   ],
-   "consistency": 0.66
-  },
-  "deepseek-flash:think": {
-   "model": "deepseek-flash",
-   "success": 3,
-   "valid_json": 3,
-   "leak_runs": 0,
-   "avg_ms": 17716,
-   "avg_prompt_tokens": 196,
-   "avg_completion_tokens": 2531,
-   "fact_hits_by_run": [
-    10,
-    9,
-    11
-   ],
-   "avg_fact_hits": 10.0,
-   "hard_fabric_all": [],
-   "soft_fabric_by_run": [
-    0,
-    0,
-    0
-   ],
-   "soft_fabric_detail": [],
-   "consistency": 0.383
-  },
-  "deepseek:fast": {
-   "model": "deepseek-v4-pro",
-   "success": 3,
-   "valid_json": 3,
-   "leak_runs": 0,
-   "avg_ms": 18613,
-   "avg_prompt_tokens": 469,
-   "avg_completion_tokens": 119,
-   "fact_hits_by_run": [
-    13,
-    10,
-    13
-   ],
-   "avg_fact_hits": 12.0,
-   "hard_fabric_all": [],
-   "soft_fabric_by_run": [
-    0,
-    0,
-    0
-   ],
-   "soft_fabric_detail": [],
-   "consistency": 0.769
-  },
-  "deepseek:think": {
-   "model": "deepseek-v4-pro",
-   "success": 3,
-   "valid_json": 3,
-   "leak_runs": 0,
-   "avg_ms": 57982,
-   "avg_prompt_tokens": 121,
-   "avg_completion_tokens": 5352,
-   "fact_hits_by_run": [
-    13,
-    12,
-    13
-   ],
-   "avg_fact_hits": 12.67,
-   "hard_fabric_all": [],
-   "soft_fabric_by_run": [
-    0,
-    0,
-    0
-   ],
-   "soft_fabric_detail": [],
-   "consistency": 0.409
-  },
   "qwen:fast": {
    "model": "qwen3.8-max",
    "success": 3,
    "valid_json": 3,
    "leak_runs": 0,
-   "avg_ms": 3893,
-   "avg_prompt_tokens": 671,
-   "avg_completion_tokens": 133,
+   "avg_ms": 3821,
+   "avg_prompt_tokens": 330,
+   "avg_completion_tokens": 134,
    "fact_hits_by_run": [
-    14,
     12,
-    13
+    15,
+    12
    ],
    "avg_fact_hits": 13.0,
    "hard_fabric_all": [],
@@ -117,30 +23,34 @@
     0
    ],
    "soft_fabric_detail": [],
-   "consistency": 0.841
+   "consistency": 0.778
   },
-  "qwen:think": {
-   "model": "qwen3.8-max",
-   "success": 1,
-   "valid_json": 1,
+  "qwen-flash:fast": {
+   "model": "qwen3.8-flash",
+   "success": 3,
+   "valid_json": 3,
    "leak_runs": 0,
-   "avg_ms": 95369,
-   "avg_prompt_tokens": 122,
-   "avg_completion_tokens": 1273,
+   "avg_ms": 3970,
+   "avg_prompt_tokens": 671,
+   "avg_completion_tokens": 173,
    "fact_hits_by_run": [
-    11,
-    null,
-    null
+    12,
+    13,
+    12
    ],
-   "avg_fact_hits": 11.0,
+   "avg_fact_hits": 12.33,
    "hard_fabric_all": [],
    "soft_fabric_by_run": [
-    0,
-    0,
-    0
+    2,
+    3,
+    2
    ],
-   "soft_fabric_detail": [],
-   "consistency": null
+   "soft_fabric_detail": [
+    "否认肝炎/结核",
+    "否认高血压/糖尿病/冠心病",
+    "手术/外伤/输血史表述"
+   ],
+   "consistency": 0.571
   }
  }
 }
