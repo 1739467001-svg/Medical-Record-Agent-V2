@@ -134,21 +134,31 @@ function styleSample(patient) {
   return s ? `\n【本院书写风格样例（仅供文风参照，禁止照抄内容）】${s}…` : '';
 }
 
-function buildMessages(spec, patient, docKey) {
+function buildMessages(spec, patient, docKey, rulesObj) {
   const eligible = spec.fields;
   const hows = eligible.map(f => `- ${f.id}（${f.label}）：${f.how}`).join('\n');
   const template = {};
   eligible.forEach(f => { template[f.id] = ''; });
+  /* 规则底稿进提示词：LLM 定位为"底稿增强"（组织/文风/补全转写事实），不是自由重写——
+   * 鉴别对象、计划条目等与底稿对齐，防止丢掉确定性引擎已对齐的内容（金标准复测依据） */
+  let draft = '';
+  if (rulesObj && rulesObj.fields) {
+    const lines = rulesObj.fields
+      .filter(f => eligible.some(e => e.id === f.id))
+      .map(f => `- ${f.id}（${f.label}）：${(f.value || '').trim() || '（空——若素材有据可补充）'}`);
+    draft = '\n【规则引擎底稿（确定性产出，作组织与事实锚点）】\n' + lines.join('\n');
+  }
   const user =
-    materialOf(patient, docKey) + styleSample(patient) +
+    materialOf(patient, docKey) + styleSample(patient) + draft +
     `\n【字段书写要求】\n${hows}` +
     `\n【输出 JSON 模板】${JSON.stringify(template)}`;
   const system =
     `你是东阿县人民医院的病历生成智能体，起草${spec.title}的指定字段。铁律：\n` +
     `1) 严禁臆造：素材中没有的事实输出空字符串，不得编造数值、日期、诊断、用药；\n` +
     `2) 客观一致：检验/检查/体征数值与素材完全一致；\n` +
-    `3) 文风：参照本院风格样例，专业、简洁、书面化医学用语；\n` +
-    `4) 输出：只输出一个 JSON 对象（键=字段id，值=中文字符串），不要解释、不要 markdown 代码块标记。`;
+    `3) 底稿增强：以【规则引擎底稿】为组织骨架与事实锚点——条目顺序、鉴别对象、计划条目与底稿保持一致，只做书面化润色与通顺重组；素材（转写/HIS）中存在而底稿缺失的事实可补充，底稿与素材都没有的内容一律不得新增；\n` +
+    `4) 文风：参照本院风格样例，专业、简洁、书面化医学用语；\n` +
+    `5) 输出：只输出一个 JSON 对象（键=字段id，值=中文字符串），不要解释、不要 markdown 代码块标记。`;
   return [
     { role: 'system', content: system },
     { role: 'user', content: user },
@@ -193,7 +203,7 @@ function mergeFields(rulesFields, out, spec, docKey) {
 
 async function generateDoc(docKey, patient, rulesObj) {
   const spec = DOC_SPECS[docKey];
-  const messages = buildMessages(spec, patient, docKey);
+  const messages = buildMessages(spec, patient, docKey, rulesObj);
   const res = await serverLLMChat({ messages, temperature: 0.2 });
   if (!res || !res.ok) {
     return { ...rulesObj, tag: `· 生成引擎：规则引擎（大模型不可用：${(res && res.error) || '未知'}，已回落）`, llm: false };
